@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Пользователи</title>
+    <link rel="stylesheet" href="/css/styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+</head>
+<body>
+<div class="container">
+    <nav id="sidebar">
+        <a href="/">Настройки</a>
+        <a href="/users" class="active">Пользователи</a>
+        <a href="/deals">Сделки</a>
+        <a href="/referrals">Вывод рефералов</a>
+        <a href="/broadcasts">Рассылка</a>
+        <a href="/analytics">Аналитика</a>
+    </nav>
+    <main>
+        <h1>Пользователи</h1>
+        <section>
+            <div class="controls">
+                <div class="filter-group">
+                    <input type="text" id="searchId" placeholder="Поиск по ID или имени">
+                    <div class="form-group">
+                        <label for="filterRegistrationDate" class="filter-label">Дата регистрации:</label>
+                        <input type="date" id="filterRegistrationDate">
+                    </div>
+                    <input type="number" id="filterDealsCount" placeholder="Мин. сделок">
+                    <input type="number" id="filterTurnover" placeholder="Мин. оборот">
+                    <div class="form-group">
+                        <label for="filterActivity" class="filter-label">Активность:</label>
+                        <input type="date" id="filterActivity">
+                    </div>
+                </div>
+                <div class="per-page-container">
+                    <select id="perPage">
+                        <option value="25">25</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                    </select>
+                </div>
+            </div>
+            <table id="usersTable">
+                <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Username</th>
+                    <th>Дата регистрации</th>
+                    <th>Количество рефералов</th>
+                    <th>Сделки (покупка | продажа)</th>
+                    <th>Оборот</th>
+                    <th>Баланс (в BTC)</th>
+                    <th>Блокировка</th>
+                    <th>Скидка на комиссию</th>
+                    <th>Удаление</th>
+                </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+            <div class="pagination">
+                <button id="prevPage" disabled>< Назад</button>
+                <span id="pageInfo">Страница 1 из 1</span>
+                <button id="nextPage" disabled>Вперед ></button>
+            </div>
+        </section>
+    </main>
+</div>
+<script src="/js/scripts.js"></script>
+</body>
+</html>

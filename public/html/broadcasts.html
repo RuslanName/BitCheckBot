@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Рассылка</title>
+    <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+<div class="container">
+    <nav id="sidebar">
+        <a href="/">Настройки</a>
+        <a href="/users">Пользователи</a>
+        <a href="/deals">Сделки</a>
+        <a href="/referrals">Вывод рефералов</a>
+        <a href="/broadcasts">Рассылка</a>
+        <a href="/analytics">Аналитика</a>
+    </nav>
+    <main>
+        <h1>Рассылка</h1>
+        <section class="form-container">
+            <h2>Создать рассылку</h2>
+            <form id="form">
+                <div class="form-group">
+                    <label for="content">Текст рассылки:</label>
+                    <textarea id="content" required></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="image">Фото:</label>
+                    <input type="file" id="image" accept="image/png,image/jpeg">
+                </div>
+                <div class="form-group">
+                    <label for="scheduledTime">Запланированное время (ДД.ММ.ГГГГ ЧЧ:ММ):</label>
+                    <input type="text" id="scheduledTime" placeholder="29.05.2025 10:00">
+                </div>
+                <div class="checkbox-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="isDaily">
+                        Ежедневная рассылка
+                    </label>
+                </div>
+                <button type="submit">Отправить</button>
+                <div id="formError" style="color: red; display: none;"></div>
+            </form>
+        </section>
+        <section>
+            <h2>Список рассылок</h2>
+            <div class="controls">
+                <input type="text" id="searchId" placeholder="Поиск по ID или тексту">
+                <select id="perPage">
+                    <option value="25">25</option>
+                    <option value="50" selected>50</option>
+                    <option value="100">100</option>
+                </select>
+            </div>
+            <table id="broadcastsTable">
+                <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Текст</th>
+                    <th>Фото</th>
+                    <th>Запланированное время</th>
+                    <th>Ежедневная</th>
+                    <th>Удаление</th>
+                </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+            <div class="pagination">
+                <button id="prevPage" disabled>< Назад</button>
+                <span id="pageInfo"></span>
+                <button id="nextPage" disabled>Вперед ></button>
+            </div>
+        </section>
+    </main>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+<script src="/js/scripts.js"></script>
+</body>
+</html>

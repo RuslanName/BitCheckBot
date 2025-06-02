@@ -1,0 +1,30 @@
+{
+  "name": "bitcheck-bot",
+  "version": "1.0.0",
+  "description": "Telegram Bot для BitCheck",
+  "main": "main_bot.js",
+  "scripts": {
+    "start_main_bot": "node main_bot.js",
+    "start_web": "node server.js",
+    "start_spam_bot": "node spam_bot.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^1.4.0",
+    "body-parser": "^2.2.0",
+    "dotenv": "^16.5.0",
+    "express": "^5.1.0",
+    "form-data": "^4.0.2",
+    "fs-extra": "^11.3.0",
+    "jsonwebtoken": "^9.0.2",
+    "jspdf": "^3.0.1",
+    "multer": "^2.0.0",
+    "node-cron": "^4.1.0",
+    "telegraf": "^4.12.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.10"
+  }
+}

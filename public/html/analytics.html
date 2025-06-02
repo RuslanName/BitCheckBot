@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Аналитика</title>
+    <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+<div class="container">
+    <nav id="sidebar">
+        <a href="/">Настройки</a>
+        <a href="/users">Пользователи</a>
+        <a href="/deals">Сделки</a>
+        <a href="/referrals">Вывод рефералов</a>
+        <a href="/broadcasts">Рассылка</a>
+        <a href="/analytics">Аналитика</a>
+    </nav>
+    <main>
+        <h1>Аналитика</h1>
+
+        <section>
+            <h2>Сделки</h2>
+            <table id="dealsAnalyticsTable">
+                <thead>
+                <tr>
+                    <th>Период</th>
+                    <th>Количество</th>
+                    <th>Сумма (RUB)</th>
+                </tr>
+                </thead>
+                <tbody>
+                <tr><td>День</td><td id="dealsDayCount">0</td><td id="dealsDayAmount">0.00</td></tr>
+                <tr><td>Неделя</td><td id="dealsWeekCount">0</td><td id="dealsWeekAmount">0.00</td></tr>
+                <tr><td>Месяц</td><td id="dealsMonthCount">0</td><td id="dealsMonthAmount">0.00</td></tr>
+                <tr><td>Год</td><td id="dealsYearCount">0</td><td id="dealsYearAmount">0.00</td></tr>
+                </tbody>
+            </table>
+        </section>
+
+        <section>
+            <h2>Доход по комиссии</h2>
+            <table id="commissionAnalyticsTable">
+                <thead>
+                <tr>
+                    <th>Период</th>
+                    <th>Доход (RUB)</th>
+                </tr>
+                </thead>
+                <tbody>
+                <tr><td>День</td><td id="commissionDay">0.00</td></tr>
+                <tr><td>Неделя</td><td id="commissionWeek">0.00</td></tr>
+                <tr><td>Месяц</td><td id="commissionMonth">0.00</td></tr>
+                <tr><td>Год</td><td id="commissionYear">0.00</td></tr>
+                </tbody>
+            </table>
+        </section>
+
+        <section>
+            <h2>Регистрация пользователей</h2>
+            <table id="usersAnalyticsTable">
+                <thead>
+                <tr>
+                    <th>Период</th>
+                    <th>Пользователи</th>
+                </tr>
+                </thead>
+                <tbody>
+                <tr><td>День</td><td id="usersDay">0</td></tr>
+                <tr><td>Неделя</td><td id="usersWeek">0</td></tr>
+                <tr><td>Месяц</td><td id="usersMonth">0</td></tr>
+                <tr><td>Год</td><td id="usersYear">0</td></tr>
+                </tbody>
+            </table>
+        </section>
+    </main>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+<script src="/js/scripts.js"></script>
+</body>
+</html>

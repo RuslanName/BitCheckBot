@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Сделки</title>
+    <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+<div class="container">
+    <nav id="sidebar">
+        <a href="/">Настройки</a>
+        <a href="/users">Пользователи</a>
+        <a href="/deals">Сделки</a>
+        <a href="/referrals">Вывод рефералов</a>
+        <a href="/broadcasts">Рассылка</a>
+        <a href="/analytics">Аналитика</a>
+    </nav>
+    <main>
+        <h1>Сделки</h1>
+        <section>
+            <div class="controls">
+                <input type="text" id="searchId" placeholder="Поиск по ID или Username...">
+                <select id="perPage">
+                    <option value="25">25</option>
+                    <option value="50" selected>50</option>
+                    <option value="100">100</option>
+                </select>
+            </div>
+            <table id="dealsTable">
+                <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Username</th>
+                    <th>Действие</th>
+                    <th>Валюта</th>
+                    <th>Сумма (RUB)</th>
+                    <th>Количество</th>
+                    <th>Комиссия (RUB)</th>
+                    <th>Итог (RUB)</th>
+                    <th>Кошелек</th>
+                    <th>Время</th>
+                    <th>Завершить</th>
+                </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+            <div class="pagination">
+                <button id="prevPage" disabled>< Назад</button>
+                <span id="pageInfo"></span>
+                <button id="nextPage" disabled>Вперед ></button>
+            </div>
+        </section>
+    </main>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+<script src="/js/scripts.js"></script>
+</body>
+</html>

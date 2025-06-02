@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Настройки</title>
+    <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+<div class="container">
+    <nav id="sidebar">
+        <a href="/">Настройки</a>
+        <a href="/users">Пользователи</a>
+        <a href="/deals">Сделки</a>
+        <a href="/referrals">Вывод рефералов</a>
+        <a href="/broadcasts">Рассылка</a>
+        <a href="/analytics">Аналитика</a>
+    </nav>
+    <main>
+        <div class="header">
+            <h1>Настройки</h1>
+            <button id="logoutBtn" class="logout-btn">Выйти из системы</button>
+        </div>
+        <section class="form-container">
+            <h2>Учетные данные</h2>
+            <form id="credentialsForm">
+                <div class="form-group">
+                    <label for="adminLogin">Логин</label>
+                    <input type="text" id="adminLogin" name="login" required value="">
+                </div>
+                <div class="form-group">
+                    <label for="adminPassword">Пароль</label>
+                    <input type="text" id="adminPassword" name="password" required value="">
+                </div>
+                <button type="submit">Обновить</button>
+            </form>
+        </section>
+        <section>
+            <div class="controls">
+                <div class="filter-group">
+                    <input type="text" id="searchId" placeholder="Поиск по параметру">
+                    <div class="per-page-container">
+                        <select id="perPage">
+                            <option value="5">5</option>
+                            <option value="10">10</option>
+                            <option value="25">25</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            <table id="configTable">
+                <thead>
+                <tr>
+                    <th>Параметр</th>
+                    <th>Значение</th>
+                </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+            <div class="pagination">
+                <button id="prevPage">< Назад</button>
+                <span id="pageInfo"></span>
+                <button id="nextPage">Вперед ></button>
+            </div>
+        </section>
+    </main>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+<script src="/js/scripts.js"></script>
+</body>
+</html>

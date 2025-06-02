@@ -1,0 +1,71 @@
+{
+  "login": "Admin",
+  "password": "12345678",
+  "adminIds": [],
+  "operatorUsernames": [
+    "@BitCheck_exchange"
+  ],
+  "minBuyAmountRubLTC": 2000,
+  "maxBuyAmountRubLTC": 120000,
+  "minSellAmountRubLTC": 3000,
+  "maxSellAmountRubLTC": 120000,
+  "minBuyAmountRubBTC": 1000,
+  "maxBuyAmountRubBTC": 120000,
+  "minSellAmountRubBTC": 3000,
+  "maxSellAmountRubBTC": 120000,
+  "commissionBuyRateLTC": 0.195,
+  "commissionBuyRateBTC": 0.22,
+  "commissionSellRateLTC": 0.07,
+  "commissionSellRateBTC": 0.07,
+  "referralCommissionRate": 0.15,
+  "commissionDiscounts": [
+    {
+      "amount": 5000,
+      "discount": 0.1
+    },
+    {
+      "amount": 15000,
+      "discount": 0.2
+    },
+    {
+      "amount": 30000,
+      "discount": 0.3
+    },
+    {
+      "amount": 50000,
+      "discount": 0.4
+    },
+    {
+      "amount": 75000,
+      "discount": 0.5
+    },
+    {
+      "amount": 100000,
+      "discount": 0.6
+    },
+    {
+      "amount": 150000,
+      "discount": 0.7
+    },
+    {
+      "amount": 250000,
+      "discount": 0.8
+    },
+    {
+      "amount": 400000,
+      "discount": 0.9
+    },
+    {
+      "amount": 600000,
+      "discount": 1
+    },
+    {
+      "amount": 800000,
+      "discount": 1.1
+    },
+    {
+      "amount": 1000000,
+      "discount": 1.2
+    }
+  ]
+}
