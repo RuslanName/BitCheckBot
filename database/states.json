@@ -1,15 +1,12 @@
 {
   "pendingBuy": {},
-  "pendingSell": {
-    "1836263458": {
-      "currency": "BTC",
-      "messageId": null
-    }
-  },
+  "pendingSell": {},
   "pendingWallet": {},
   "pendingCaptcha": {},
   "pendingWithdrawReferralAmount": {},
-  "pendingMessageIds": {},
+  "pendingMessageIds": {
+    "1836263458": 13233
+  },
   "pendingSupport": {},
   "pendingOperatorMessages": {}
 }

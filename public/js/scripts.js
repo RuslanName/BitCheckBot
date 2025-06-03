@@ -489,7 +489,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             tbody.innerHTML = '';
             if (total === 0) {
-                tbody.innerHTML = '<tr><td colspan="9">На данный момент информация отсутствует</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="10">На данный момент информация отсутствует</td></tr>';
                 return;
             }
 
@@ -500,9 +500,30 @@ document.addEventListener('DOMContentLoaded', () => {
                     (d.rubAmount || d.amount)
                 );
                 const turnover = userDeals.reduce((sum, d) => sum + (d.rubAmount || d.amount || 0), 0);
-                const dealsCount = userDeals.length;
-                const buyCount = userDeals.filter(d => d.type === 'buy').length;
-                const sellCount = userDeals.filter(d => d.type === 'sell').length;
+                const periods = ['day', 'week', 'month', 'year'];
+                const getPeriodFilter = (period) => {
+                    const now = new Date();
+                    let startDate;
+                    switch (period) {
+                        case 'day':
+                            startDate = new Date(now.setHours(0, 0, 0, 0));
+                            break;
+                        case 'week':
+                            startDate = new Date(now.setDate(now.getDate() - now.getDay()));
+                            startDate.setHours(0, 0, 0, 0);
+                            break;
+                        case 'month':
+                            startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+                            break;
+                        case 'year':
+                            startDate = new Date(now.getFullYear(), 0, 1);
+                            break;
+                    }
+                    return deal => new Date(deal.timestamp) >= startDate;
+                };
+                const totalCounts = periods.map(period => userDeals.filter(getPeriodFilter(period)).length);
+                const buyCounts = periods.map(period => userDeals.filter(d => d.type === 'buy' && getPeriodFilter(period)(d)).length);
+                const sellCounts = periods.map(period => userDeals.filter(d => d.type === 'sell' && getPeriodFilter(period)(d)).length);
                 const referralsCount = Array.isArray(u.referrals) ? u.referrals.length : 0;
                 const discount = await getCommissionDiscount(turnover);
 
@@ -512,7 +533,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     <td><a href="https://t.me/${u.username}" target="_blank">${u.username || '-'}</a></td>
                     <td>${formatDateTime(u.registrationDate)}</td>
                     <td>${referralsCount}</td>
-                    <td>${dealsCount} (${buyCount} | ${sellCount})</td>
+                    <td>
+                        Сделки: ${totalCounts.join(' | ')}<br>
+                        Покупка: ${buyCounts.join(' | ')}<br>
+                        Продажа: ${sellCounts.join(' | ')}
+                    </td>
                     <td>${turnover.toFixed(2)}</td>
                     <td><input type="number" value="${(u.balance || 0).toFixed(8)}" data-id="${u.id}" class="balance-input" step="0.00000001" /></td>
                     <td>
@@ -665,7 +690,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     <td>${d.total.toFixed(2)}</td>
                     <td>${d.walletAddress}</td>
                     <td>${formatDateTime(d.timestamp)}</td>
-                    <td><button class="complete-deal" data-id="${d.id}">Завершить</button></td>
+                    <td>
+                        <button class="delete-deal" data-id="${d.id}">Удалить</button>
+                        <button class="complete-deal" data-id="${d.id}">Завершить</button>
+                    </td>
                 `;
                 tbody.appendChild(tr);
             });
@@ -673,6 +701,23 @@ document.addEventListener('DOMContentLoaded', () => {
             pageInfo.textContent = `Страница ${page} из ${Math.ceil(total / perPage) || 1}`;
             prevBtn.disabled = page === 1;
             nextBtn.disabled = page >= Math.ceil(total / perPage);
+
+            document.querySelectorAll('.delete-deal').forEach(btn => {
+                btn.onclick = () => {
+                    const dealId = btn.dataset.id;
+                    api.delete(`/deals/${dealId}`).then(() => {
+                        deals = deals.filter(d => d.id !== dealId);
+                        renderDealsTable();
+                    }).catch(err => {
+                        if (err.response?.status === 401 || err.response?.status === 403) {
+                            localStorage.removeItem('token');
+                            window.location.href = '/login';
+                        } else {
+                            console.error('Error deleting deal:', err);
+                        }
+                    });
+                };
+            });
 
             document.querySelectorAll('.complete-deal').forEach(btn => {
                 btn.onclick = () => {

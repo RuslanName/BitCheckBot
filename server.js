@@ -279,6 +279,18 @@ app.patch('/api/deals/:id/complete', authenticateToken, async (req, res) => {
     }
 });
 
+app.delete('/api/deals/:id', authenticateToken, (req, res) => {
+    try {
+        let deals = loadJson('deals');
+        deals = deals.filter(d => d.id !== req.params.id);
+        saveJson('deals', deals);
+        res.sendStatus(204);
+    } catch (err) {
+        console.error('Error deleting deal:', err.message);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
 app.get('/api/broadcasts', authenticateToken, (req, res) => {
     try {
         res.json(loadJson('broadcasts'));
