@@ -209,7 +209,7 @@ async function sendBroadcast(broadcast) {
 
         try {
             const options = {
-                caption: `${broadcast.text}\n\n🚀 BitCheck — твой надёжный обменник для покупки и продажи Bitcoin!`
+                caption: `${broadcast.text}\n\n🚀 BitCheck — твой надёжный обменник для покупки и продажи Bitcoin и Litecoin!`
             };
             let msg;
             if (imagePath) {
@@ -392,11 +392,21 @@ main_bot.use(async (ctx, next) => {
 
 main_bot.use(async (ctx, next) => {
     try {
-        const commands = ['/start', '💰 Купить', '💸 Продать', '💬 Отзывы', '💬 Чат', '🤝 Партнёрство', '🆘 Поддержка'];
+        const commands = ['/start', '/profile', '💰 Купить', '💸 Продать', '💬 Отзывы', '💬 Чат', '🤝 Партнёрство', '🆘 Поддержка'];
         if (ctx.message && ctx.message.text && commands.includes(ctx.message.text)) {
             const states = loadStates();
             clearPendingStates(states, ctx.from.id);
             saveJson('states', states);
+
+            if (ctx.message.text !== '/start') {
+                const users = loadJson('users');
+                const userId = ctx.from.id;
+                const user = users.find(u => u.id === userId);
+                if (!user) {
+                    await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, { caption: '❌ Вы не зарегистрированы. Используйте /start' });
+                    return;
+                }
+            }
         }
         await next();
     } catch (error) {
@@ -454,11 +464,6 @@ main_bot.command('profile', async ctx => {
     const users = loadJson('users');
     const userId = ctx.from.id;
     const user = users.find(u => u.id === userId);
-    if (!user) {
-        await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, { caption: '❌ Вы не зарегистрированы. Используйте /start' });
-        return;
-    }
-
     const priceBTC = await getBtcRubPrice();
     const stats = calculateUserStats(userId);
     const earningsRub = user.balance * priceBTC;
@@ -500,10 +505,7 @@ main_bot.hears('🤝 Партнёрство', async ctx => {
     const users = loadJson('users');
     const states = loadStates();
     const userId = ctx.from.id;
-    const user = users.find(u => u.id === userId);
-    if (!user) return ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, { caption: '❌ /start' });
-
-    const referralLink = `https://t.me/${ctx.botInfo.username}?start=ref_${user.referralId}`;
+    const user = users.find(u => u.id === userId);const referralLink = `https://t.me/${ctx.botInfo.username}?start=ref_${user.referralId}`;
     const priceBTC = await getBtcRubPrice();
     const earningsRub = user.balance * priceBTC;
     const text = `🤝 Реферальная программа\n🔗 ${referralLink}\n👥 Приглашено: ${(user.referrals || []).length}\n💰 Заработано: ${(user.balance || 0).toFixed(8)} BTC (~${earningsRub.toFixed(2)} RUB)\n${Date.now() - lastPriceUpdate > CACHE_DURATION ? '⚠️ Курс может быть устаревшим' : ''}`;
@@ -1086,14 +1088,7 @@ main_bot.on('callback_query', async ctx => {
 
         if (data === 'refresh_profile') {
             const userId = ctx.from.id;
-            const user = users.find(u => u.id === userId);
-            if (!user) {
-                await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, { caption: '❌ Вы не зарегистрированы. Используйте /start' });
-                await ctx.answerCbQuery('Ошибка: пользователь не найден', { show_alert: true });
-                return;
-            }
-
-            const priceBTC = await getBtcRubPrice();
+            const user = users.find(u => u.id === userId);const priceBTC = await getBtcRubPrice();
             const stats = calculateUserStats(userId);
             const earningsRub = user.balance * priceBTC;
             const username = user.username ? `@${user.username}` : 'Нет';
