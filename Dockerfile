@@ -8,23 +8,16 @@ RUN npm install
 
 COPY . .
 
-RUN mkdir -p public/css public/html public/js public/images database && \
+RUN mkdir -p public/css public/html public/js && \
     touch public/css/styles.css \
+          public/js/scripts.js \
           public/html/index.html \
           public/html/users.html \
           public/html/deals.html \
           public/html/referrals.html \
           public/html/broadcasts.html \
           public/html/analytics.html \
-          public/html/login.html \
-          public/js/scripts.js \
-          public/images/bit-check-image.png \
-          database/config.json \
-          database/deals.json \
-          database/broadcasts.json \
-          database/users.json \
-          database/withdrawals.json \
-          database/states.json
+          public/html/login.html
 
 RUN npm install -g concurrently
 
