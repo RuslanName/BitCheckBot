@@ -19,10 +19,10 @@ main_bot.telegram.setMyCommands([
     console.error('Error setting bot commands:', err.message);
 });
 
-let cachedBtcRubPrice = 5000000;
-let cachedLtcRubPrice = cachedBtcRubPrice * 0.02;
+let cachedBtcRubPrice = 8200000;
+let cachedLtcRubPrice = 6800;
 let lastPriceUpdate = 0;
-const CACHE_DURATION = 60 * 1000;
+const CACHE_DURATION = 3 * 60 * 1000;
 
 const cronTasks = new Map();
 
@@ -344,25 +344,19 @@ async function updatePrices() {
     }
 
     try {
-        const response = await axios.get('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,litecoin&vs_currencies=rub', { timeout: 5000 });
-        cachedBtcRubPrice = response.data.bitcoin.rub || 5000000;
-        cachedLtcRubPrice = response.data.litecoin.rub || (cachedBtcRubPrice * 0.02);
+        const response = await axios.get('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,litecoin&vs_currencies=rub', { timeout: 10000 });
+        cachedBtcRubPrice = response.data.bitcoin.rub || cachedBtcRubPrice;
+        cachedLtcRubPrice = response.data.litecoin.rub || cachedLtcRubPrice;
         lastPriceUpdate = now;
-        console.log('Prices updated:', { btc: cachedBtcRubPrice, ltc: cachedLtcRubPrice });
     } catch (error) {
         if (error.response && error.response.status === 429) {
             await new Promise(resolve => setTimeout(resolve, 5000));
             try {
-                const retryResponse = await axios.get('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,litecoin&vs_currencies=rub', { timeout: 5000 });
-                cachedBtcRubPrice = retryResponse.data.bitcoin.rub || 5000000;
-                cachedLtcRubPrice = retryResponse.data.litecoin.rub || (cachedBtcRubPrice * 0.02);
+                const retryResponse = await axios.get('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,litecoin&vs_currencies=rub', { timeout: 10000 });
+                cachedBtcRubPrice = retryResponse.data.bitcoin.rub || cachedBtcRubPrice;
+                cachedLtcRubPrice = retryResponse.data.litecoin.rub || cachedLtcRubPrice;
                 lastPriceUpdate = now;
-                console.log('Prices updated on retry:', { btc: cachedBtcRubPrice, ltc: cachedLtcRubPrice });
-            } catch (retryError) {
-                console.error('Error retrying price fetch:', retryError.message);
-            }
-        } else {
-            console.error('Error fetching prices:', error.message);
+            } catch (retryError) {}
         }
     }
 }
@@ -376,6 +370,8 @@ async function getLtcRubPrice() {
     await updatePrices();
     return cachedLtcRubPrice;
 }
+
+setInterval(updatePrices, CACHE_DURATION);
 
 async function checkIfBlocked(ctx) {
     const users = loadJson('users');
@@ -957,6 +953,7 @@ main_bot.on('message', async ctx => {
             delete states.pendingWallet[id];
             saveJson('withdrawals', withdrawals);
             saveJson('states', states);
+            saveJson('users', users);
             return;
         }
 
