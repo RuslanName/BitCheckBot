@@ -14,7 +14,7 @@ const bot = new Telegraf(process.env.SPAM_BOT_TOKEN, {
     telegram: { webhookReply: false },
 });
 
-const imagePath = path.join(process.env.DATA_PATH, 'images/bit-check-image.png');
+const imagePath = path.join(__dirname, 'public/images/bit-check-image.png');
 if (!fs.existsSync(imagePath)) {
     log(`Error: Image file not found at ${imagePath}`);
     process.exit(1);
@@ -120,7 +120,7 @@ bot.on('message', async (ctx) => {
                         await ctx.telegram.deleteMessage(chatId, messageId).catch((err) => {
                             log(`Error deleting message with username: chatId=${chatId}, messageId=${messageId}, error=${err.message}`);
                         });
-                        log(`Deleted message with disallowed username: chatId=${chatId}, messageId=${messageId}, userId=${ctx.from.id}, usernames=${usernames.join(',')}`);
+                        log(`Deleted message with disallowed username: chatId=${chatId}, messageId=${messageId}, userId=${ctx.from.id}, usernames=${usnames.join(',')}`);
                     } else {
                         log(`Username allowed from admin: userId=${ctx.from.id}, usernames=${usernames.join(',')}`);
                     }

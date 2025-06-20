@@ -8,13 +8,11 @@ const multer = require('multer');
 const jwt = require('jsonwebtoken');
 require('dotenv').config();
 const EventEmitter = require('events');
-const cors = require('cors');
 
 const app = express();
 app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/html', express.static(path.join(__dirname, 'public/html')));
-app.use(cors());
 
 const TELEGRAM_API = `https://api.telegram.org/bot${process.env.MAIN_BOT_TOKEN}`;
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -24,7 +22,7 @@ module.exports = { broadcastEmitter };
 
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
-        const dir = path.join(process.env.DATA_PATH, 'images/broadcasts-images');
+        const dir = path.join(__dirname, 'public/images/broadcasts-images');
         fs.ensureDirSync(dir);
         cb(null, dir);
     },
@@ -46,7 +44,7 @@ const upload = multer({
 });
 
 function loadJson(name) {
-    const filePath = path.join(process.env.DATA_PATH, 'database', `${name}.json`);
+    const filePath = path.join(__dirname, 'database', `${name}.json`);
     try {
         if (!fs.existsSync(filePath)) {
             return [];
@@ -60,7 +58,7 @@ function loadJson(name) {
 
 function saveJson(name, data) {
     try {
-        const filePath = path.join(process.env.DATA_PATH, 'database', `${name}.json`);
+        const filePath = path.join(__dirname, 'database', `${name}.json`);
         fs.writeJsonSync(filePath, data, { spaces: 2 });
     } catch (err) {
         console.error(`Error saving ${name}.json:`, err.message);
@@ -224,7 +222,7 @@ app.patch('/api/deals/:id/complete', authenticateToken, async (req, res) => {
             try {
                 const form = new FormData();
                 form.append('chat_id', userId);
-                form.append('photo', fs.createReadStream(path.join(__dirname, 'data/images/bit-check-image.png')));
+                form.append('photo', fs.createReadStream(path.join(__dirname, 'public/images/bit-check-image.png')));
                 form.append('caption', caption);
                 form.append('reply_markup', JSON.stringify({
                     inline_keyboard: [
@@ -259,7 +257,7 @@ app.patch('/api/deals/:id/complete', authenticateToken, async (req, res) => {
                     try {
                         const form = new FormData();
                         form.append('chat_id', referrer.id);
-                        form.append('photo', fs.createReadStream(path.join(__dirname, 'data/images/bit-check-image.png')));
+                        form.append('photo', fs.createReadStream(path.join(__dirname, 'public/images/bit-check-image.png')));
                         form.append('caption', `🎉 Реферальный бонус! +${commissionBTC.toFixed(8)} BTC (~${earningsRub.toFixed(2)}) за сделку ID ${deal.id}`);
                         await axios.post(`${TELEGRAM_API}/sendPhoto`, form, {
                             headers: form.getHeaders(),
@@ -328,7 +326,7 @@ app.delete('/api/broadcasts/:id', authenticateToken, (req, res) => {
         let list = loadJson('broadcasts');
         const broadcast = list.find(x => x.id === req.params.id);
         if (broadcast && broadcast.imageName) {
-            const imagePath = path.join(__dirname, 'data/images/broadcasts-images', broadcast.imageName);
+            const imagePath = path.join(__dirname, 'public/images/broadcasts-images', broadcast.imageName);
             fs.removeSync(imagePath);
         }
         list = list.filter(x => x.id !== req.params.id);
@@ -394,7 +392,7 @@ app.patch('/api/withdrawals/:id/complete', authenticateToken, async (req, res) =
         try {
             const form = new FormData();
             form.append('chat_id', userId);
-            form.append('photo', fs.createReadStream(path.join(__dirname, 'data/images/bit-check-image.png')));
+            form.append('photo', fs.createReadStream(path.join(__dirname, 'public/images/bit-check-image.png')));
             form.append('caption', caption);
             form.append('reply_markup', JSON.stringify({
                 inline_keyboard: [
@@ -445,4 +443,4 @@ app.get('/analytics', (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, '0.0.0.0', () => console.log(`Server started on port ${PORT}`));
+app.listen(PORT, () => console.log(`Server started on port ${PORT}`));
