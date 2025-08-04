@@ -140,11 +140,6 @@ th {
     cursor: pointer;
 }
 
-.pagination button:disabled {
-    background: #95a5a6;
-    cursor: not-allowed;
-}
-
 button {
     padding: 6px 12px;
     margin: 4px;
@@ -494,6 +489,11 @@ input[type="number"]#filterTurnover::-webkit-outer-spin-button {
     height: 0;
 }
 
+.toggle-label {
+    margin-left: 10px;
+    font-size: 14px;
+}
+
 .slider {
     position: absolute;
     cursor: pointer;
@@ -528,6 +528,17 @@ input:checked + .slider:before {
 
 .per-page-container {
     margin-left: auto;
+}
+
+button:disabled {
+    background: #95a5a6;
+}
+
+.toggle-container {
+    display: flex;
+    align-items: center;
+    margin-top: 15px;
+    margin-bottom: 15px;
 }
 
 @media (max-width: 768px) {

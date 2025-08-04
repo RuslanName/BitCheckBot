@@ -18,11 +18,23 @@ const TELEGRAM_API = `https://api.telegram.org/bot${process.env.MAIN_BOT_TOKEN}`
 const JWT_SECRET = process.env.JWT_SECRET;
 
 const broadcastEmitter = new EventEmitter();
+
 module.exports = { broadcastEmitter };
+
+function getBotStatus() {
+    const config = loadJson('config');
+    return config.botStatus !== false;
+}
+
+function setBotStatus(status) {
+    const config = loadJson('config');
+    config.botStatus = status;
+    saveJson('config', config);
+}
 
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
-        const dir = path.join(__dirname, 'public/images/broadcasts-images');
+        const dir = path.join(process.env.DATA_PATH, 'images/broadcasts-images');
         fs.ensureDirSync(dir);
         cb(null, dir);
     },
@@ -44,7 +56,7 @@ const upload = multer({
 });
 
 function loadJson(name) {
-    const filePath = path.join(__dirname, 'database', `${name}.json`);
+    const filePath = path.join(process.env.DATA_PATH, 'database', `${name}.json`);
     try {
         if (!fs.existsSync(filePath)) {
             return [];
@@ -58,7 +70,7 @@ function loadJson(name) {
 
 function saveJson(name, data) {
     try {
-        const filePath = path.join(__dirname, 'database', `${name}.json`);
+        const filePath = path.join(process.env.DATA_PATH, 'database', `${name}.json`);
         fs.writeJsonSync(filePath, data, { spaces: 2 });
     } catch (err) {
         console.error(`Error saving ${name}.json:`, err.message);
@@ -131,6 +143,29 @@ app.put('/api/config/credentials', authenticateToken, (req, res) => {
     } else {
         res.status(400).json({ error: 'Логин и пароль обязательны' });
     }
+});
+
+app.get('/api/bot/status', authenticateToken, (req, res) => {
+    res.json({ botEnabled: getBotStatus() });
+});
+
+app.post('/api/bot/toggle', authenticateToken, (req, res) => {
+    const { enabled } = req.body;
+
+    if (typeof enabled !== 'boolean') {
+        return res.status(400).json({ error: 'Неверный параметр enabled' });
+    }
+
+    if (getBotStatus() === enabled) {
+        const statusText = enabled ? 'включен' : 'отключен';
+        return res.status(400).json({ error: `Бот уже ${statusText}` });
+    }
+
+    setBotStatus(enabled);
+    res.json({
+        message: enabled ? 'Бот включен' : 'Бот отключен',
+        botEnabled: enabled
+    });
 });
 
 app.get('/api/users', authenticateToken, (req, res) => {
@@ -222,7 +257,7 @@ app.patch('/api/deals/:id/complete', authenticateToken, async (req, res) => {
             try {
                 const form = new FormData();
                 form.append('chat_id', userId);
-                form.append('photo', fs.createReadStream(path.join(__dirname, 'public/images/bit-check-image.png')));
+                form.append('photo', fs.createReadStream(path.join(process.env.DATA_PATH, 'public/images/bit-check-image.png')));
                 form.append('caption', caption);
                 form.append('reply_markup', JSON.stringify({
                     inline_keyboard: [
@@ -257,7 +292,7 @@ app.patch('/api/deals/:id/complete', authenticateToken, async (req, res) => {
                     try {
                         const form = new FormData();
                         form.append('chat_id', referrer.id);
-                        form.append('photo', fs.createReadStream(path.join(__dirname, 'public/images/bit-check-image.png')));
+                        form.append('photo', fs.createReadStream(path.join(process.env.DATA_PATH, 'public/images/bit-check-image.png')));
                         form.append('caption', `🎉 Реферальный бонус! +${commissionBTC.toFixed(8)} BTC (~${earningsRub.toFixed(2)}) за сделку ID ${deal.id}`);
                         await axios.post(`${TELEGRAM_API}/sendPhoto`, form, {
                             headers: form.getHeaders(),
@@ -302,7 +337,7 @@ app.get('/api/broadcasts', authenticateToken, (req, res) => {
 
 app.post('/api/broadcasts', authenticateToken, upload.single('image'), (req, res) => {
     try {
-        const list = loadJson('broadcasts');
+        const list = loadJson('broadcasts') || [];
         const item = {
             id: Date.now().toString(),
             text: req.body.content,
@@ -311,6 +346,9 @@ app.post('/api/broadcasts', authenticateToken, upload.single('image'), (req, res
             timestamp: new Date().toISOString(),
             isDaily: req.body.isDaily === 'true'
         };
+        if (!item.isDaily) {
+            item.status = 'pending';
+        }
         list.push(item);
         saveJson('broadcasts', list);
         broadcastEmitter.emit('newBroadcast');
@@ -326,7 +364,7 @@ app.delete('/api/broadcasts/:id', authenticateToken, (req, res) => {
         let list = loadJson('broadcasts');
         const broadcast = list.find(x => x.id === req.params.id);
         if (broadcast && broadcast.imageName) {
-            const imagePath = path.join(__dirname, 'public/images/broadcasts-images', broadcast.imageName);
+            const imagePath = path.join(process.env.DATA_PATH, 'public/images/broadcasts-images', broadcast.imageName);
             fs.removeSync(imagePath);
         }
         list = list.filter(x => x.id !== req.params.id);
@@ -392,7 +430,7 @@ app.patch('/api/withdrawals/:id/complete', authenticateToken, async (req, res) =
         try {
             const form = new FormData();
             form.append('chat_id', userId);
-            form.append('photo', fs.createReadStream(path.join(__dirname, 'public/images/bit-check-image.png')));
+            form.append('photo', fs.createReadStream(path.join(process.env.DATA_PATH, 'public/images/bit-check-image.png')));
             form.append('caption', caption);
             form.append('reply_markup', JSON.stringify({
                 inline_keyboard: [

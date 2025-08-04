@@ -38,13 +38,11 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Проверка авторизации
     if (!localStorage.getItem('token') && curr !== 'login') {
         window.location.href = '/login';
         return;
     }
 
-    // Обработчик выхода из системы
     const logoutBtn = document.getElementById('logoutBtn');
     if (logoutBtn) {
         logoutBtn.addEventListener('click', () => {
@@ -70,6 +68,53 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const arrayKeys = ['adminIds', 'operatorUsernames', 'commissionDiscounts'];
 
+        const statusToggle = document.createElement('div');
+        statusToggle.className = 'toggle-container';
+
+        statusToggle.innerHTML = `
+            <label class="switch">
+                <input type="checkbox" id="botStatusToggle" />
+                <span class="slider round"></span>
+            </label>
+            <span class="toggle-label">Статус бота</span>
+        `;
+
+        if (credentialsForm) {
+            credentialsForm.parentNode.insertBefore(statusToggle, credentialsForm.nextSibling);
+        }
+
+        async function updateBotStatus() {
+            try {
+                const response = await api.get('/bot/status');
+                const toggle = document.getElementById('botStatusToggle');
+                if (toggle) {
+                    toggle.checked = response.data.botEnabled;
+                }
+            } catch (err) {
+                console.error('Error fetching bot status:', err);
+            }
+        }
+
+        const toggle = document.getElementById('botStatusToggle');
+        if (toggle) {
+            toggle.addEventListener('change', async (e) => {
+                try {
+                    const newStatus = e.target.checked;
+                    await api.post('/bot/toggle', { enabled: newStatus });
+                } catch (err) {
+                    console.error('Error updating bot status:', err);
+                    await updateBotStatus();
+                }
+            });
+        }
+
+        const checkBtn = document.getElementById('checkBotStatus');
+        if (checkBtn) {
+            checkBtn.addEventListener('click', updateBotStatus);
+        }
+
+        updateBotStatus();
+
         const paramTranslations = {
             adminIds: 'ID администраторов',
             operatorUsernames: 'Имена операторов',
@@ -89,7 +134,6 @@ document.addEventListener('DOMContentLoaded', () => {
             commissionDiscounts: 'Скидки на комиссию'
         };
 
-        // Загрузка конфигурации
         api.get('/config').then(r => {
             config = r.data;
             renderConfigTable();
@@ -103,7 +147,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
 
-        // Загрузка текущих учетных данных
         api.get('/config/credentials').then(r => {
             const credentials = r.data;
             if (adminLoginInput && adminPasswordInput) {
@@ -235,7 +278,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const currentValue = config[key] || [];
             const modal = document.createElement('div');
             modal.className = 'modal';
-            let itemsHtml = '';
             if (key === 'commissionDiscounts') {
                 itemsHtml = currentValue.map((item, idx) => `
                     <div class="array-item">
@@ -602,6 +644,21 @@ document.addEventListener('DOMContentLoaded', () => {
         const nextBtn = document.getElementById('nextPage');
         const pageInfo = document.getElementById('pageInfo');
 
+        const statusToggle = document.createElement('div');
+        statusToggle.className = 'toggle-container';
+
+        statusToggle.innerHTML = `
+            <label class="switch">
+                <input type="checkbox" id="statusToggle" />
+                <span class="slider round"></span>
+            </label>
+            <span class="toggle-label">Открытые сделки</span>
+        `;
+
+        const filterGroup = searchInput.closest('.filter-group') || searchInput.parentElement;
+
+        filterGroup.parentNode.insertBefore(statusToggle, filterGroup.nextSibling);
+
         if (!tbody || !searchInput || !perPageSelect || !prevBtn || !nextBtn || !pageInfo) {
             console.error('Missing required elements for deals page');
             return;
@@ -611,6 +668,7 @@ document.addEventListener('DOMContentLoaded', () => {
         let users = [];
         let page = 1;
         let perPage = parseInt(perPageSelect.value) || 25;
+        let showCompleted = false;
 
         Promise.all([
             api.get('/deals'),
@@ -633,17 +691,20 @@ document.addEventListener('DOMContentLoaded', () => {
             page = 1;
             renderDealsTable();
         });
+
         perPageSelect.addEventListener('change', (e) => {
             perPage = parseInt(e.target.value) || 25;
             page = 1;
             renderDealsTable();
         });
+
         prevBtn.onclick = () => {
             if (page > 1) {
                 page--;
                 renderDealsTable();
             }
         };
+
         nextBtn.onclick = () => {
             if (page < Math.ceil(filterDeals().length / perPage)) {
                 page++;
@@ -651,10 +712,21 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         };
 
+        statusToggle.querySelector('#statusToggle').addEventListener('change', (e) => {
+            showCompleted = e.target.checked;
+            page = 1;
+            statusToggle.querySelector('.toggle-label').textContent = showCompleted
+                ? 'Завершенные сделки'
+                : 'Открытые сделки';
+            renderDealsTable();
+        });
+
         function filterDeals() {
             const term = searchInput.value.trim().toLowerCase();
             return deals.filter(d => {
-                if (!d || d.status !== 'pending') return false;
+                if (!d || d.status === 'draft') return false;
+                if (showCompleted && d.status !== 'completed') return false;
+                if (!showCompleted && d.status === 'completed') return false;
                 const user = users.find(u => u.id === d.userId) || {};
                 return (
                     (d.id && d.id.toString().includes(term)) ||
@@ -666,6 +738,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         function renderDealsTable() {
             const list = filterDeals();
+            list.sort((a, b) => {
+                if (a.status === 'pending' && b.status === 'completed') return -1;
+                if (a.status === 'completed' && b.status === 'pending') return 1;
+                return 0;
+            });
+
             const total = list.length;
             const start = (page - 1) * perPage;
             const slice = list.slice(start, start + perPage);
@@ -680,21 +758,25 @@ document.addEventListener('DOMContentLoaded', () => {
                 const user = users.find(u => u.id === d.userId) || {};
                 const tr = document.createElement('tr');
                 tr.innerHTML = `
-                    <td>${d.id || '-'}</td>
-                    <td><a href="https://t.me/${user.username}" target="_blank">${user.username || d.username}</a></td>
-                    <td>${d.type === 'buy' ? 'Покупка' : 'Продажа'}</td>
-                    <td>${d.currency}</td>
-                    <td>${d.rubAmount.toFixed(2)}</td>
-                    <td>${d.cryptoAmount.toFixed(8)}</td>
-                    <td>${d.commission.toFixed(2)}</td>
-                    <td>${d.total.toFixed(2)}</td>
-                    <td>${d.walletAddress}</td>
-                    <td>${formatDateTime(d.timestamp)}</td>
-                    <td>
-                        <button class="delete-deal" data-id="${d.id}">Удалить</button>
-                        <button class="complete-deal" data-id="${d.id}">Завершить</button>
-                    </td>
-                `;
+                <td>${d.id || '-'}</td>
+                <td><a href="https://t.me/${user.username}" target="_blank">${user.username || d.username}</a></td>
+                <td>${d.type === 'buy' ? 'Покупка' : 'Продажа'}</td>
+                <td>${d.currency}</td>
+                <td>${d.rubAmount.toFixed(2)}</td>
+                <td>${d.cryptoAmount.toFixed(8)}</td>
+                <td>${d.commission.toFixed(2)}</td>
+                <td>${d.total.toFixed(2)}</td>
+                <td>${d.walletAddress}</td>
+                <td>${formatDateTime(d.timestamp)}</td>
+                <td>
+                    ${d.status === 'completed'
+                    ? '<button class="complete-deal" data-id="${d.id}" disabled>Завершено</button>'
+                    : `
+                            <button class="delete-deal" data-id="${d.id}">Удалить</button>
+                            <button class="complete-deal" data-id="${d.id}">Завершить</button>
+                        `}
+                </td>
+            `;
                 tbody.appendChild(tr);
             });
 
@@ -719,7 +801,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 };
             });
 
-            document.querySelectorAll('.complete-deal').forEach(btn => {
+            document.querySelectorAll('.complete-deal:not(:disabled)').forEach(btn => {
                 btn.onclick = () => {
                     const dealId = btn.dataset.id;
                     api.patch(`/deals/${dealId}/complete`).then(() => {
@@ -1048,24 +1130,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
         function getPeriodFilter(period) {
             const now = new Date();
-            let startDate;
+            let startDate = new Date(now);
+
             switch (period) {
                 case 'day':
-                    startDate = new Date(now.setHours(0, 0, 0, 0));
+                    startDate.setDate(now.getDate() - 1);
                     break;
                 case 'week':
-                    startDate = new Date(now.setDate(now.getDate() - now.getDay()));
-                    startDate.setHours(0, 0, 0, 0);
+                    startDate.setDate(now.getDate() - 7);
                     break;
                 case 'month':
-                    startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+                    startDate.setDate(now.getDate() - 30);
                     break;
                 case 'year':
-                    startDate = new Date(now.getFullYear(), 0, 1);
+                    startDate.setDate(now.getDate() - 365);
                     break;
                 default:
                     startDate = new Date(0);
             }
+
             return item => new Date(item.timestamp) >= startDate;
         }
 

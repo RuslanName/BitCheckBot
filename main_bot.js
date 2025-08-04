@@ -8,6 +8,8 @@ const { broadcastEmitter } = require('./server');
 
 const main_bot = new Telegraf(process.env.MAIN_BOT_TOKEN);
 
+const BIT_CHECK_IMAGE_PATH = path.join(process.env.DATA_PATH + 'images/bit-check-image.png');
+
 main_bot.telegram.setMyCommands([
     { command: 'start', description: 'Запустить бота и открыть меню' },
     { command: 'profile', description: 'Посмотреть профиль и статистику' }
@@ -28,7 +30,7 @@ let isScheduling = false;
 let reloadTimeout = null;
 
 function loadJson(name) {
-    const filePath = path.join(__dirname, 'database', `${name}.json`);
+    const filePath = path.join(process.env.DATA_PATH, 'database', `${name}.json`);
     try {
         if (!fs.existsSync(filePath)) {
             return [];
@@ -42,7 +44,7 @@ function loadJson(name) {
 
 function saveJson(name, data) {
     try {
-        const filePath = path.join(__dirname, 'database', `${name}.json`);
+        const filePath = path.join(process.env.DATA_PATH, 'database', `${name}.json`);
         fs.writeJsonSync(filePath, data, { spaces: 2 });
     } catch (err) {
         console.error(`Error saving ${name}.json:`, err.message);
@@ -50,7 +52,7 @@ function saveJson(name, data) {
 }
 
 function loadStates() {
-    const filePath = path.join(__dirname, 'database', 'states.json');
+    const filePath = path.join(process.env.DATA_PATH, 'database', 'states.json');
     try {
         if (!fs.existsSync(filePath)) {
             const defaultStates = {
@@ -186,6 +188,16 @@ async function sendBroadcast(broadcast) {
         return;
     }
 
+    if (!broadcast.isDaily && broadcasts[broadcastIndex].status === 'sent') {
+        console.log(`Broadcast ${broadcast.id} already sent, skipping`);
+        return;
+    }
+
+    if (!broadcast.isDaily) {
+        broadcasts[broadcastIndex].status = 'sending';
+        saveJson('broadcasts', broadcasts);
+    }
+
     const users = loadJson('users') || [];
     if (!Array.isArray(users)) {
         console.error('Invalid users data format');
@@ -194,7 +206,8 @@ async function sendBroadcast(broadcast) {
 
     let imagePath = null;
     if (broadcast.imageName) {
-        imagePath = `./public/images/broadcasts-images/${broadcast.imageName}`;
+        imagePath = path.join(process.env.DATA_PATH, 'images/broadcasts-images', broadcast.imageName);
+        console.log(`Broadcast image ${imagePath}`);
         if (!fs.existsSync(imagePath)) {
             console.error(`Image not found for broadcast ${broadcast.id}: ${imagePath}`);
             imagePath = null;
@@ -215,7 +228,7 @@ async function sendBroadcast(broadcast) {
             if (imagePath) {
                 msg = await main_bot.telegram.sendPhoto(user.id, { source: imagePath }, options);
             } else {
-                msg = await main_bot.telegram.sendPhoto(user.id, { source: './public/images/bit-check-image.png' }, options);
+                msg = await main_bot.telegram.sendPhoto(user.id, { source: BIT_CHECK_IMAGE_PATH }, options);
             }
         } catch (error) {
             console.error(`Error sending broadcast ${broadcast.id} to user ${user.id}:`, error.message);
@@ -223,13 +236,24 @@ async function sendBroadcast(broadcast) {
         }
     }
 
+    broadcasts = loadJson('broadcasts') || [];
+    const updatedBroadcast = broadcasts.find(b => b.id === broadcast.id);
+    if (!updatedBroadcast) {
+        console.error(`Broadcast ${broadcast.id} not found after sending`);
+        return;
+    }
+
     if (broadcast.isDaily) {
-        const nextDay = new Date(broadcasts[broadcastIndex].scheduledTime);
+        const nextDay = new Date(updatedBroadcast.scheduledTime);
         nextDay.setDate(nextDay.getDate() + 1);
-        broadcasts[broadcastIndex].scheduledTime = nextDay.toISOString();
+        updatedBroadcast.scheduledTime = nextDay.toISOString();
         console.log(`Updated scheduledTime for daily broadcast ${broadcast.id} to ${nextDay.toISOString()}`);
         saveJson('broadcasts', broadcasts);
     } else {
+        updatedBroadcast.status = 'sent';
+        saveJson('broadcasts', broadcasts);
+        console.log(`Marked one-time broadcast ${broadcast.id} as sent`);
+
         if (imagePath) {
             try {
                 fs.unlinkSync(imagePath);
@@ -266,7 +290,7 @@ function reloadBroadcasts() {
     }, 10000);
 }
 
-fs.watch(path.join(__dirname, 'database', 'broadcasts.json'), (eventType, filename) => {
+fs.watch(path.join(process.env.DATA_PATH, 'database/broadcasts.json'), (eventType, filename) => {
     if (eventType === 'change') {
         console.log(`Detected change in ${filename}, reloading broadcasts...`);
         reloadBroadcasts();
@@ -375,11 +399,22 @@ async function checkIfBlocked(ctx) {
     const users = loadJson('users');
     const user = users.find(u => u.id === ctx.from.id);
     if (user && user.isBlocked) {
-        await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, { caption: '🚫 Заблокирован' });
+        await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, { caption: '🚫 Заблокирован' });
         return true;
     }
     return false;
 }
+
+main_bot.use(async (ctx, next) => {
+    const config = loadJson('config');
+    if (config.botStatus === false) {
+        await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
+            caption: '🚫 Бот временно отключен. Пожалуйста, попробуйте позже.'
+        });
+        return;
+    }
+    await next();
+});
 
 main_bot.use(async (ctx, next) => {
     if (ctx.from && await checkIfBlocked(ctx)) return;
@@ -399,7 +434,7 @@ main_bot.use(async (ctx, next) => {
                 const userId = ctx.from.id;
                 const user = users.find(u => u.id === userId);
                 if (!user) {
-                    await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, { caption: '❌ Вы не зарегистрированы. Используйте /start' });
+                    await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, { caption: '❌ Вы не зарегистрированы. Используйте /start' });
                     return;
                 }
             }
@@ -407,7 +442,7 @@ main_bot.use(async (ctx, next) => {
         await next();
     } catch (error) {
         console.error('Error in middleware:', error.message);
-        await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, { caption: '❌ Произошла ошибка, попробуйте снова' });
+        await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, { caption: '❌ Произошла ошибка, попробуйте снова' });
     }
 });
 
@@ -428,7 +463,7 @@ main_bot.command('start', async ctx => {
     if (!user) {
         const correctFruit = ['🍒', '🍏', '🥕', '🍌', '🍋', '🍐'][Math.floor(Math.random() * 6)];
         states.pendingCaptcha[userId] = { correct: correctFruit, invitedBy, messageId: ctx.message.message_id };
-        await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, {
+        await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
             caption: `👋 ${ctx.from.first_name}!\nВыбери ${correctFruit}:`,
             reply_markup: {
                 inline_keyboard: [
@@ -445,7 +480,7 @@ main_bot.command('start', async ctx => {
         const referralLink = `https://t.me/${ctx.botInfo.username}?start=ref_${user.referralId}`;
         const profileText = `👤 Твой профиль в BitCheck\n📛 Имя: ${username}\n🆔 ID: ${userId}\n\n📦 Статистика:\n🔄 Сделок совершено: ${stats.dealsCount}\n👥 Приведено рефералов: ${(user.referrals || []).length}\n💸 Реферальный заработок: ${(user.balance).toFixed(8)} BTC (~ ${earningsRub.toFixed(2)} RUB)\n\n📥 Куплено:\n₿ BTC: ${stats.boughtBTC.rub.toFixed(2)} RUB (${stats.boughtBTC.crypto.toFixed(8)} BTC)\nŁ LTC: ${stats.boughtLTC.rub.toFixed(2)} RUB (${stats.boughtLTC.crypto.toFixed(8)} LTC)\n\n📤 Продано:\n₿ BTC: ${stats.soldBTC.rub.toFixed(2)} RUB (${stats.soldBTC.crypto.toFixed(8)} BTC)\nŁ LTC: ${stats.soldLTC.rub.toFixed(2)} RUB (${stats.soldLTC.crypto.toFixed(8)} LTC)\n\n🔗 Твоя ссылка:\n👉 ${referralLink}\n\n💰 Приглашайте друзей и получайте бонусы!\n🚀 BitCheck — твой надёжный обменник для покупки и продажи Bitcoin и Litecoin!`;
 
-        await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, {
+        await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
             caption: profileText,
             reply_markup: {
                 keyboard: [['💰 Купить', '💸 Продать'], ['💬 Чат'], ['💬 Отзывы', '🆘 Поддержка'], ['🤝 Партнёрство']],
@@ -473,7 +508,7 @@ main_bot.command('profile', async ctx => {
     });
     const profileText = `👤 Твой профиль в BitCheck\n📛 Имя: ${username}\n🆔 ID: ${userId}\n\n📦 Статистика:\n🔄 Сделок совершено: ${stats.dealsCount}\n👥 Приведено рефералов: ${(user.referrals || []).length}\n💸 Реферальный заработок: ${(user.balance).toFixed(8)} BTC (~ ${earningsRub.toFixed(2)} RUB)\n\n📥 Куплено:\n₿ BTC: ${stats.boughtBTC.rub.toFixed(2)} RUB (${stats.boughtBTC.crypto.toFixed(8)} BTC)\nŁ LTC: ${stats.boughtLTC.rub.toFixed(2)} RUB (${stats.boughtLTC.crypto.toFixed(8)} LTC)\n\n📤 Продано:\n₿ BTC: ${stats.soldBTC.rub.toFixed(2)} RUB (${stats.soldBTC.crypto.toFixed(8)} BTC)\nŁ LTC: ${stats.soldLTC.rub.toFixed(2)} RUB (${stats.soldLTC.crypto.toFixed(8)} LTC)\n\n🔗 Твоя ссылка:\n👉 ${referralLink}\n\n💰 Приглашайте друзей и получайте бонусы!\n🚀 BitCheck — твой надёжный обменник для покупки и продажи Bitcoin и Litecoin!\n\n🕒 Обновлено: ${timestamp}`;
 
-    await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, {
+    await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
         caption: profileText,
         reply_markup: {
             inline_keyboard: [
@@ -484,14 +519,14 @@ main_bot.command('profile', async ctx => {
 });
 
 main_bot.hears('💬 Отзывы', async ctx => {
-    await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, {
+    await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
         caption: '📝 Отзывы BitCheck',
         reply_markup: { inline_keyboard: [[{ text: 'Группа 📣', url: 'https://t.me/bitcheck_ot' }]] }
     });
 });
 
 main_bot.hears('💬 Чат', async ctx => {
-    await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, {
+    await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
         caption: '💬 Чат BitCheck',
         reply_markup: { inline_keyboard: [[{ text: 'Перейти в чат 🚪', url: 'https://t.me/BitCheck01' }]] }
     });
@@ -505,7 +540,7 @@ main_bot.hears('🤝 Партнёрство', async ctx => {
     const priceBTC = await getBtcRubPrice();
     const earningsRub = user.balance * priceBTC;
     const text = `🤝 Реферальная программа\n🔗 ${referralLink}\n👥 Приглашено: ${(user.referrals || []).length}\n💰 Заработано: ${(user.balance || 0).toFixed(8)} BTC (~${earningsRub.toFixed(2)} RUB)\n${Date.now() - lastPriceUpdate > CACHE_DURATION ? '⚠️ Курс может быть устаревшим' : ''}`;
-    const message = await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, {
+    const message = await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
         caption: text,
         reply_markup: {
             inline_keyboard: [
@@ -522,7 +557,7 @@ main_bot.hears('💰 Купить', async ctx => {
     const config = loadJson('config');
     const states = loadStates();
     if (!config.minBuyAmountRubBTC || !config.maxBuyAmountRubBTC || !config.minBuyAmountRubLTC || !config.maxBuyAmountRubLTC) {
-        await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, {
+        await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
             caption: '❌ Ошибка: конфигурация не загружена. Обратитесь в поддержку.'
         });
         return;
@@ -534,7 +569,7 @@ main_bot.hears('💰 Купить', async ctx => {
     const minLTCAmount = (config.minBuyAmountRubLTC / priceLTC).toFixed(8);
     const maxLTCAmount = (config.maxBuyAmountRubLTC / priceLTC).toFixed(8);
     states.pendingBuy[ctx.from.id] = { currency: null, messageId: null };
-    const message = await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, {
+    const message = await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
         caption: `💰 Выберите валюту:\n💲BTC\nМин: ${config.minBuyAmountRubBTC} RUB (~${minBTCAmount} BTC)\nМакс: ${config.maxBuyAmountRubBTC} RUB (~${maxBTCAmount} BTC)\n💲LTC\nМин: ${config.minBuyAmountRubLTC} RUB (~${minLTCAmount} LTC)\nМакс: ${config.maxBuyAmountRubLTC} RUB (~${maxLTCAmount} LTC)\n${Date.now() - lastPriceUpdate > CACHE_DURATION ? '⚠️ Курс может быть устаревшим' : ''}`,
         reply_markup: {
             inline_keyboard: [
@@ -553,7 +588,7 @@ main_bot.hears('💸 Продать', async ctx => {
 
     const states = loadStates();
     if (!config.minSellAmountRubBTC || !config.maxSellAmountRubBTC || !config.minSellAmountRubLTC || !config.maxSellAmountRubLTC) {
-        await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, {
+        await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
             caption: '❌ Ошибка: конфигурация не загружена. Обратитесь в поддержку.'
         });
         return;
@@ -565,7 +600,7 @@ main_bot.hears('💸 Продать', async ctx => {
     const minLTCAmount = (config.minSellAmountRubLTC / priceLTC).toFixed(8);
     const maxLTCAmount = (config.maxSellAmountRubLTC / priceLTC).toFixed(8);
     states.pendingSell[ctx.from.id] = { currency: null, messageId: null };
-    const message = await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, {
+    const message = await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
         caption: `💸 Выберите валюту:\n💲BTC\nМин: ${config.minSellAmountRubBTC} RUB (~${minBTCAmount} BTC)\nМакс: ${config.maxSellAmountRubBTC} RUB (~${maxBTCAmount} BTC)\n💲LTC\nМин: ${config.minSellAmountRubLTC} RUB (~${minLTCAmount} LTC)\nМакс: ${config.maxSellAmountRubLTC} RUB (~${maxLTCAmount} LTC)\n${Date.now() - lastPriceUpdate > CACHE_DURATION ? '⚠️ Курс может быть устаревшим' : ''}`,
         reply_markup: {
             inline_keyboard: [
@@ -581,7 +616,7 @@ main_bot.hears('💸 Продать', async ctx => {
 
 main_bot.hears('🆘 Поддержка', async ctx => {
     const states = loadStates();
-    const message = await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, {
+    const message = await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
         caption: '🆘 Напишите нам!',
         reply_markup: {
             inline_keyboard: [
@@ -619,7 +654,7 @@ main_bot.on('message', async ctx => {
                 const targetUser = users.find(u => u.id === supportData.targetId);
                 if (targetUser && await isValidChat(supportData.targetId)) {
                     try {
-                        await main_bot.telegram.sendPhoto(supportData.targetId, { source: 'public/images/bit-check-image.png' }, {
+                        await main_bot.telegram.sendPhoto(supportData.targetId, { source: BIT_CHECK_IMAGE_PATH }, {
                             caption: `📩 Ответ от поддержки:\n${ctx.message.text}`,
                             reply_markup: {
                                 inline_keyboard: [
@@ -628,13 +663,13 @@ main_bot.on('message', async ctx => {
                                 ]
                             }
                         });
-                        await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, { caption: `✅ Ответ отправлен пользователю ID ${supportData.targetId}` });
+                        await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, { caption: `✅ Ответ отправлен пользователю ID ${supportData.targetId}` });
                     } catch (error) {
                         console.error(`Error sending response to user ${supportData.targetId}:`, error.message);
-                        await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, { caption: `❌ Ошибка отправки ответа пользователю ID ${supportData.targetId}` });
+                        await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, { caption: `❌ Ошибка отправки ответа пользователю ID ${supportData.targetId}` });
                     }
                 } else {
-                    await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, { caption: `❌ Пользователь ID ${supportData.targetId} не найден или чат недоступен` });
+                    await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, { caption: `❌ Пользователь ID ${supportData.targetId} не найден или чат недоступен` });
                 }
             } else {
                 const u = users.find(u => u.id === id);
@@ -656,7 +691,7 @@ main_bot.on('message', async ctx => {
                     try {
                         const operatorId = users.find(u => u.username === operator.replace('@', ''))?.id;
                         if (operatorId && await isValidChat(operatorId)) {
-                            const message = await main_bot.telegram.sendPhoto(operatorId, { source: 'public/images/bit-check-image.png' }, {
+                            const message = await main_bot.telegram.sendPhoto(operatorId, { source: BIT_CHECK_IMAGE_PATH }, {
                                 caption: `🆘 От ${userDisplay} (ID ${id})\n${ctx.message.text}`,
                                 reply_markup: {
                                     inline_keyboard: [
@@ -672,7 +707,7 @@ main_bot.on('message', async ctx => {
                     }
                 }
 
-                await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, { caption: '🚀 Отправлено!' });
+                await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, { caption: '🚀 Отправлено!' });
             }
 
             saveJson('states', states);
@@ -699,7 +734,7 @@ main_bot.on('message', async ctx => {
                 } catch (error) {
                     console.error(`Error deleting message ${states.pendingMessageIds[id]}:`, error.message);
                 }
-                const message = await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, {
+                const message = await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
                     caption: `❌ Введите корректную сумму в RUB или ${currency}`
                 });
                 states.pendingMessageIds[id] = message.message_id;
@@ -727,7 +762,7 @@ main_bot.on('message', async ctx => {
                     } catch (error) {
                         console.error(`Error deleting message ${states.pendingMessageIds[id]}:`, error.message);
                     }
-                    const message = await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, {
+                    const message = await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
                         caption: `Мин: ${minBuyAmountRub} RUB (~${minBTCAmount} BTC, ~${minLTCAmount} LTC)\nМакс: ${maxBuyAmountRub} RUB (~${maxBTCAmount} BTC, ~${maxLTCAmount} LTC)`
                     });
                     states.pendingMessageIds[id] = message.message_id;
@@ -749,7 +784,7 @@ main_bot.on('message', async ctx => {
                     } catch (error) {
                         console.error(`Error deleting message ${states.pendingMessageIds[id]}:`, error.message);
                     }
-                    const message = await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, {
+                    const message = await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
                         caption: `Мин: ${minBuyAmountRub} RUB (~${minBTCAmount} BTC, ~${minLTCAmount} LTC)\nМакс: ${maxBuyAmountRub} RUB (~${maxBTCAmount} BTC, ~${maxLTCAmount} LTC)`
                     });
                     states.pendingMessageIds[id] = message.message_id;
@@ -778,7 +813,7 @@ main_bot.on('message', async ctx => {
                 commission: states.pendingBuy[id].commission,
                 total: states.pendingBuy[id].total
             };
-            const message = await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, {
+            const message = await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
                 caption: `💼 Введите адрес кошелька для ${currency}`,
                 reply_markup: {
                     inline_keyboard: [[{ text: '❌ Отменить', callback_data: 'cancel_action' }]]
@@ -810,7 +845,7 @@ main_bot.on('message', async ctx => {
                 } catch (error) {
                     console.error(`Error deleting message ${states.pendingMessageIds[id]}:`, error.message);
                 }
-                const message = await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, {
+                const message = await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
                     caption: `❌ Введите корректную сумму в RUB или ${currency}`
                 });
                 states.pendingMessageIds[id] = message.message_id;
@@ -844,7 +879,7 @@ main_bot.on('message', async ctx => {
                 } catch (error) {
                     console.error(`Error deleting message ${states.pendingMessageIds[id]}:`, error.message);
                 }
-                const message = await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, {
+                const message = await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
                     caption: `Мин: ${minSellAmountRub} RUB (~${minBTCAmount} BTC, ~${minLTCAmount} LTC)\nМакс: ${maxSellAmountRub} RUB (~${maxBTCAmount} BTC, ~${maxLTCAmount} LTC)`
                 });
                 states.pendingMessageIds[id] = message.message_id;
@@ -867,7 +902,7 @@ main_bot.on('message', async ctx => {
                 commission,
                 rubBefore
             };
-            const message = await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, {
+            const message = await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
                 caption: `💼 Введите реквизиты (CБП или номер карты)`,
                 reply_markup: {
                     inline_keyboard: [[{ text: '❌ Отменить', callback_data: 'cancel_action' }]]
@@ -887,7 +922,7 @@ main_bot.on('message', async ctx => {
                 } catch (error) {
                     console.error(`Error deleting message ${states.pendingMessageIds[id]}:`, error.message);
                 }
-                const message = await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, {
+                const message = await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
                     caption: `❌ Введите корректный адрес кошелька для BTC`
                 });
                 states.pendingMessageIds[id] = message.message_id;
@@ -916,7 +951,7 @@ main_bot.on('message', async ctx => {
 
             const randomOperator = config.operatorUsernames[Math.floor(Math.random() * config.operatorUsernames.length)];
             const contactUrl = randomOperator?.startsWith('@') ? `https://t.me/${randomOperator.substring(1)}` : 'https://t.me/OperatorName';
-            const message = await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, {
+            const message = await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
                 caption: `✅ Заявка на вывод рефералов создана! № ${withdrawal.id}\nКоличество: ${withdrawal.cryptoAmount.toFixed(8)} BTC (~${withdrawal.rubAmount.toFixed(2)} RUB)\nКошелёк: ${withdrawal.walletAddress}`,
                 reply_markup: {
                     inline_keyboard: [
@@ -934,7 +969,7 @@ main_bot.on('message', async ctx => {
                 try {
                     const operatorId = users.find(u => u.username === operator.replace('@', ''))?.id;
                     if (operatorId && await isValidChat(operatorId)) {
-                        await main_bot.telegram.sendPhoto(operatorId, { source: 'public/images/bit-check-image.png' }, {
+                        await main_bot.telegram.sendPhoto(operatorId, { source: BIT_CHECK_IMAGE_PATH }, {
                             caption: `🆕 Новая заявка на вывод рефералов № ${withdrawal.id}\n@${user.username || 'Нет'} (ID ${user.id})\nКоличество: ${withdrawal.cryptoAmount.toFixed(8)} BTC\nСумма: ${withdrawal.rubAmount.toFixed(2)} RUB\nКошелёк: ${withdrawal.walletAddress}`,
                             reply_markup: {
                                 inline_keyboard: [
@@ -963,7 +998,7 @@ main_bot.on('message', async ctx => {
                 } catch (error) {
                     console.error(`Error deleting message ${states.pendingMessageIds[id]}:`, error.message);
                 }
-                const message = await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, {
+                const message = await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
                     caption: `❌ Введите корректные реквизиты или адрес кошелька для ${states.pendingWallet[id].currency}`
                 });
                 states.pendingMessageIds[id] = message.message_id;
@@ -1002,7 +1037,7 @@ main_bot.on('message', async ctx => {
             }
             const actionText = states.pendingWallet[id].type === 'buy' ? 'покупки' : 'продажи';
             const paymentTarget = states.pendingWallet[id].type === 'buy' ? 'Кошелёк' : 'Реквизиты';
-            const message = await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, {
+            const message = await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
                 caption: `✅ Подтверждение ${actionText} ${deal.currency}\nКоличество: ${deal.cryptoAmount} ${states.pendingWallet[id].currency}\nСумма: ${deal.rubAmount} RUB\nКомиссия: ${deal.commission} RUB (скидка ${discount}%)\nИтог: ${deal.total} RUB\n${paymentTarget}: ${deal.walletAddress}`,
                 reply_markup: {
                     inline_keyboard: [
@@ -1035,7 +1070,7 @@ main_bot.on('message', async ctx => {
                 } catch (error) {
                     console.error(`Error deleting message ${states.pendingMessageIds[id]}:`, error.message);
                 }
-                const message = await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, {
+                const message = await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
                     caption: `❌ Введите корректное количество BTC (макс: ${user.balance.toFixed(8)} BTC)`
                 });
                 states.pendingMessageIds[id] = message.message_id;
@@ -1054,7 +1089,7 @@ main_bot.on('message', async ctx => {
                 amount,
                 rubAmount
             };
-            const message = await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, {
+            const message = await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
                 caption: `💼 Введите адрес кошелька для BTC`,
                 reply_markup: {
                     inline_keyboard: [[{ text: '❌ Отменить', callback_data: 'cancel_action' }]]
@@ -1109,7 +1144,7 @@ main_bot.on('callback_query', async ctx => {
                 await ctx.answerCbQuery('Профиль обновлен', { show_alert: false });
             } catch (error) {
                 console.error('Error updating profile:', error.message);
-                await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, { caption: profileText, reply_markup: {
+                await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, { caption: profileText, reply_markup: {
                         inline_keyboard: [
                             [{ text: '🔄 Обновить', callback_data: 'refresh_profile' }]
                         ]
@@ -1138,7 +1173,7 @@ main_bot.on('callback_query', async ctx => {
 
             delete states.pendingMessageIds[userId];
 
-            const message = await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, {
+            const message = await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
                 caption: '❌ Действие отменено'
             });
 
@@ -1163,7 +1198,7 @@ main_bot.on('callback_query', async ctx => {
             }
 
             if (!captchaData) {
-                await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, { caption: '❌ Капча истекла. Используйте /start' });
+                await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, { caption: '❌ Капча истекла. Используйте /start' });
                 await ctx.answerCbQuery('Капча истекла', { show_alert: false });
                 return;
             }
@@ -1179,7 +1214,7 @@ main_bot.on('callback_query', async ctx => {
                             referrer.referrals = referrer.referrals || [];
                             referrer.referrals.push(from);
                             try {
-                                await main_bot.telegram.sendPhoto(referrer.id, { source: 'public/images/bit-check-image.png' }, { caption: `👥 ${ctx.from.first_name || 'Пользователь'} приглашён!` });
+                                await main_bot.telegram.sendPhoto(referrer.id, { source: BIT_CHECK_IMAGE_PATH }, { caption: `👥 ${ctx.from.first_name || 'Пользователь'} приглашён!` });
                             } catch (error) {
                                 console.error(`Error sending notification to referrer ${referrer.id}:`, error.message);
                             }
@@ -1209,7 +1244,7 @@ main_bot.on('callback_query', async ctx => {
                 const referralLink = `https://t.me/${ctx.botInfo.username}?start=ref_${user.referralId}`;
                 const profileText = `👤 Твой профиль в BitCheck\n📛 Имя: ${username}\n🆔 ID: ${from}\n\n📦 Статистика:\n🔄 Сделок совершено: ${stats.dealsCount}\n👥 Приведено рефералов: ${(user.referrals || []).length}\n💸 Реферальный заработок: ${(user.balance).toFixed(8)} BTC (~ ${earningsRub.toFixed(2)} RUB)\n\n📥 Куплено:\n₿ BTC: ${stats.boughtBTC.rub.toFixed(2)} RUB (${stats.boughtBTC.crypto.toFixed(8)} BTC)\nŁ LTC: ${stats.boughtLTC.rub.toFixed(2)} RUB (${stats.boughtLTC.crypto.toFixed(8)} LTC)\n\n📤 Продано:\n₿ BTC: ${stats.soldBTC.rub.toFixed(2)} RUB (${stats.soldBTC.crypto.toFixed(8)} BTC)\nŁ LTC: ${stats.soldLTC.rub.toFixed(2)} RUB (${stats.soldLTC.crypto.toFixed(8)} LTC)\n\n🔗 Твоя ссылка:\n👉 ${referralLink}\n\n💰 Приглашайте друзей и получайте бонусы!\n🚀 BitCheck — твой надёжный обменник для покупки и продажи Bitcoin и Litecoin!`;
 
-                await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, {
+                await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
                     caption: profileText,
                     reply_markup: {
                         keyboard: [['💰 Купить', '💸 Продать'], ['💬 Чат'], ['💬 Отзывы', '🆘 Поддержка'], ['🤝 Партнёрство']],
@@ -1223,7 +1258,7 @@ main_bot.on('callback_query', async ctx => {
             } else {
                 const correctFruit = ['🍒', '🍏', '🥕', '🍌', '🍋', '🍐'][Math.floor(Math.random() * 6)];
                 states.pendingCaptcha[from] = { correct: correctFruit, invitedBy: captchaData.invitedBy };
-                await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, {
+                await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
                     caption: `👋 ${ctx.from.first_name}!\nВыбери ${correctFruit}:`,
                     reply_markup: {
                         inline_keyboard: [
@@ -1245,7 +1280,7 @@ main_bot.on('callback_query', async ctx => {
             }
 
             states.pendingSupport[from] = true;
-            const message = await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, {
+            const message = await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
                 caption: '✉️ Напишите:',
                 reply_markup: {
                     inline_keyboard: [
@@ -1272,7 +1307,7 @@ main_bot.on('callback_query', async ctx => {
                 delete states.pendingOperatorMessages[targetId];
             }
             states.pendingSupport[from] = { targetId };
-            await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, { caption: `✉️ Введите ответ для ID ${targetId}:` });
+            await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, { caption: `✉️ Введите ответ для ID ${targetId}:` });
             await ctx.answerCbQuery('Введите ответ', { show_alert: false });
             saveJson('states', states);
             return;
@@ -1291,7 +1326,7 @@ main_bot.on('callback_query', async ctx => {
                 }
                 delete states.pendingOperatorMessages[targetId];
             }
-            await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, { caption: '✅ Обращение закрыто' });
+            await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, { caption: '✅ Обращение закрыто' });
             await ctx.answerCbQuery('Обращение закрыто', { show_alert: false });
             saveJson('states', states);
             return;
@@ -1300,7 +1335,7 @@ main_bot.on('callback_query', async ctx => {
         if (data === 'withdraw_referral') {
             const user = users.find(u => u.id === from);
             if (!user || !user.balance) {
-                await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, { caption: '❌ Нет средств' });
+                await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, { caption: '❌ Нет средств' });
                 await ctx.answerCbQuery('Нет средств для вывода', { show_alert: false });
                 saveJson('states', states);
                 return;
@@ -1319,7 +1354,7 @@ main_bot.on('callback_query', async ctx => {
             }
 
             states.pendingWithdrawReferralAmount[from] = true;
-            const message = await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, {
+            const message = await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
                 caption: `💸 Введите количество BTC\nМакс: ${user.balance.toFixed(8)} BTC (~${earningsRub.toFixed(2)} RUB)`,
                 reply_markup: {
                     inline_keyboard: [[{ text: '❌ Отменить', callback_data: 'cancel_action' }]]
@@ -1344,7 +1379,7 @@ main_bot.on('callback_query', async ctx => {
             } catch (error) {
                 console.error(`Error deleting message ${states.pendingMessageIds[from]}:`, error.message);
             }
-            const message = await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, {
+            const message = await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
                 caption: `💰 Введите сумму для покупки ${currency} (в RUB или ${currency})\nМин: ${minAmountRub} RUB (~${minAmountCrypto} ${currency})\nМакс: ${maxAmountRub} RUB (~${maxAmountCrypto} ${currency})`,
                 reply_markup: {
                     inline_keyboard: [[{ text: '❌ Отменить', callback_data: 'cancel_action' }]]
@@ -1369,7 +1404,7 @@ main_bot.on('callback_query', async ctx => {
             } catch (error) {
                 console.error(`Error deleting message ${states.pendingMessageIds[from]}:`, error.message);
             }
-            const message = await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, {
+            const message = await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
                 caption: `💸 Введите сумму для продажи ${currency} (в RUB или ${currency})\nМин: ${minAmountRub} RUB (~${minAmountCrypto} ${currency})\nМакс: ${maxAmountRub} RUB (~${maxAmountCrypto} ${currency})`,
                 reply_markup: {
                     inline_keyboard: [[{ text: '❌ Отменить', callback_data: 'cancel_action' }]]
@@ -1385,7 +1420,7 @@ main_bot.on('callback_query', async ctx => {
             const dealId = data.split('_')[1];
             const dealIndex = deals.findIndex(d => d.id === dealId && d.status === 'draft');
             if (dealIndex === -1) {
-                await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, { caption: '❌ Заявка не найдена или уже обработана' });
+                await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, { caption: '❌ Заявка не найдена или уже обработана' });
                 await ctx.answerCbQuery('Заявка не найдена', { show_alert: false });
                 return;
             }
@@ -1406,7 +1441,7 @@ main_bot.on('callback_query', async ctx => {
             } catch (error) {
                 console.error(`Error deleting message ${states.pendingMessageIds[deal.userId]}:`, error.message);
             }
-            const message = await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, {
+            const message = await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
                 caption: `✅ Заявка на сделку создана! № ${deal.id}\n${actionText} ${deal.currency}\nКоличество: ${deal.cryptoAmount} ${deal.currency}\nСумма: ${deal.rubAmount} RUB\nКомиссия: ${deal.commission} RUB (скидка ${discount}%)\nИтог: ${deal.total} RUB\n${paymentTarget}: ${deal.walletAddress}`,
                 reply_markup: {
                     inline_keyboard: [
@@ -1421,7 +1456,7 @@ main_bot.on('callback_query', async ctx => {
                 try {
                     const operatorId = users.find(u => u.username === operator.replace('@', ''))?.id;
                     if (operatorId && await isValidChat(operatorId)) {
-                        await main_bot.telegram.sendPhoto(operatorId, { source: 'public/images/bit-check-image.png' }, {
+                        await main_bot.telegram.sendPhoto(operatorId, { source: BIT_CHECK_IMAGE_PATH }, {
                             caption: `🆕 Новая заявка на сделку № ${deal.id}\n${actionText} ${deal.currency}\n@${user.username || 'Нет'} (ID ${deal.userId})\nКоличество: ${deal.cryptoAmount}\nСумма: ${deal.rubAmount} RUB\nКомиссия: ${deal.commission} RUB (скидка ${discount}%)\nИтог: ${deal.total} RUB\n${paymentTarget}: ${deal.walletAddress}`,
                             reply_markup: {
                                 inline_keyboard: [
@@ -1450,7 +1485,7 @@ main_bot.on('callback_query', async ctx => {
                 } catch (error) {
                     console.error(`Error deleting message ${states.pendingMessageIds[from]}:`, error.message);
                 }
-                const message = await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, {
+                const message = await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
                     caption: `❌ Заявка на вывод с ID ${withdrawalId} не найдена`
                 });
                 states.pendingMessageIds[from] = message.message_id;
@@ -1469,7 +1504,7 @@ main_bot.on('callback_query', async ctx => {
             } catch (error) {
                 console.error(`Error deleting message ${states.pendingMessageIds[from]}:`, error.message);
             }
-            const message = await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, {
+            const message = await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
                 caption: `❌ Заявка на вывод с ID ${withdrawal.id} отменена`
             });
             states.pendingMessageIds[from] = message.message_id;
@@ -1484,7 +1519,7 @@ main_bot.on('callback_query', async ctx => {
             const withdrawalId = data.split('_')[2];
             const withdrawalIndex = withdrawals.findIndex(w => w.id === withdrawalId);
             if (withdrawalIndex === -1) {
-                await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, { caption: '❌ Заявка не найдена' });
+                await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, { caption: '❌ Заявка не найдена' });
                 await ctx.answerCbQuery('Заявка не найдена', { show_alert: false });
                 return;
             }
@@ -1499,7 +1534,7 @@ main_bot.on('callback_query', async ctx => {
                 try {
                     const operatorId = users.find(u => u.username === operator.replace('@', ''))?.id;
                     if (operatorId && await isValidChat(operatorId)) {
-                        await main_bot.telegram.sendPhoto(operatorId, { source: 'public/images/bit-check-image.png' }, {
+                        await main_bot.telegram.sendPhoto(operatorId, { source: BIT_CHECK_IMAGE_PATH }, {
                             caption: `✅ Вывод рефералов с ID ${withdrawal.id} завершен:\n${userDisplay}\nКоличество: ${withdrawal.cryptoAmount} BTC\nСумма: ${withdrawal.rubAmount} RUB`
                         });
                     }
@@ -1520,9 +1555,9 @@ main_bot.on('callback_query', async ctx => {
                 try {
                     await ctx.deleteMessage(states.pendingMessageIds[from]);
                 } catch (error) {
-                    console.error(`Error deleting message ${states.pendingMessageIds[from]}:`, error.message);
+                    console.error(`Ошибка удаления сообщения ${states.pendingMessageIds[from]}:`, error.message);
                 }
-                const message = await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, {
+                const message = await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
                     caption: `❌ Заявка с ID ${dealId} не найдена`
                 });
                 states.pendingMessageIds[from] = message.message_id;
@@ -1539,9 +1574,9 @@ main_bot.on('callback_query', async ctx => {
             try {
                 await ctx.deleteMessage(states.pendingMessageIds[from]);
             } catch (error) {
-                console.error(`Error deleting message ${states.pendingMessageIds[from]}:`, error.message);
+                console.error(`Ошибка удаления сообщения ${states.pendingMessageIds[from]}:`, error.message);
             }
-            const message = await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, {
+            const message = await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
                 caption: `❌ Заявка с ID ${deal.id} отменена`
             });
             states.pendingMessageIds[from] = message.message_id;
@@ -1551,23 +1586,24 @@ main_bot.on('callback_query', async ctx => {
                     try {
                         const operatorId = users.find(u => u.username === operator.replace('@', ''))?.id;
                         if (operatorId && await isValidChat(operatorId)) {
-                            await main_bot.telegram.sendPhoto(operatorId, { source: 'public/images/bit-check-image.png' }, {
+                            await main_bot.telegram.sendPhoto(operatorId, { source: BIT_CHECK_IMAGE_PATH }, {
                                 caption: `❌ Заявка на сделку № ${deal.id} отменена\n${actionText} ${deal.currency}\n@${user.username || 'Нет'} (ID ${deal.userId})`
                             });
                         }
                     } catch (error) {
-                        console.error(`Error sending to operator ${operator}:`, error.message);
+                        console.error(`Ошибка отправки оператору ${operator}:`, error.message);
                     }
                 }
             }
 
             await ctx.answerCbQuery('Заявка отменена', { show_alert: false });
 
+            saveJson('deals', deals);
             saveJson('states', states);
         }
     } catch (error) {
         console.error('Error processing callback query:', error.message);
-        await ctx.replyWithPhoto({ source: 'public/images/bit-check-image.png' }, { caption: '❌ Ошибка обработки запроса' });
+        await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, { caption: '❌ Ошибка обработки запроса' });
         await ctx.answerCbQuery('Ошибка обработки', { show_alert: false });
     }
 });
