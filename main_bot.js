@@ -687,9 +687,10 @@ main_bot.on('message', async ctx => {
                 const operatorMessageIds = [];
                 states.pendingOperatorMessages[id] = operatorMessageIds;
 
-                for (const operator of config.operatorUsernames) {
+                const operators = config.multipleOperatorsData || [];
+                for (const operator of operators) {
                     try {
-                        const operatorId = users.find(u => u.username === operator.replace('@', ''))?.id;
+                        const operatorId = users.find(u => u.username === operator.username)?.id;
                         if (operatorId && await isValidChat(operatorId)) {
                             const message = await main_bot.telegram.sendPhoto(operatorId, { source: BIT_CHECK_IMAGE_PATH }, {
                                 caption: `🆘 От ${userDisplay} (ID ${id})\n${ctx.message.text}`,
@@ -703,7 +704,7 @@ main_bot.on('message', async ctx => {
                             operatorMessageIds.push({ operatorId, messageId: message.message_id });
                         }
                     } catch (error) {
-                        console.error(`Error sending message to operator ${operator}:`, error.message);
+                        console.error(`Error sending message to operator ${operator.username}:`, error.message);
                     }
                 }
 
@@ -949,10 +950,10 @@ main_bot.on('message', async ctx => {
                 console.error(`Error deleting message ${states.pendingMessageIds[id]}:`, error.message);
             }
 
-            const randomOperator = config.operatorUsernames[Math.floor(Math.random() * config.operatorUsernames.length)];
-            const contactUrl = randomOperator?.startsWith('@') ? `https://t.me/${randomOperator.substring(1)}` : 'https://t.me/OperatorName';
+            const operator = config.multipleOperatorsData.find(op => op.currency === 'BTC') || config.multipleOperatorsData[0];
+            const contactUrl = operator?.username ? `https://t.me/${operator.username}` : 'https://t.me/OperatorName';
             const message = await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
-                caption: `✅ Заявка на вывод рефералов создана! № ${withdrawal.id}\nКоличество: ${withdrawal.cryptoAmount.toFixed(8)} BTC (~${withdrawal.rubAmount.toFixed(2)} RUB)\nКошелёк: ${withdrawal.walletAddress}`,
+                caption: `✅ Заявка на вывод рефералов создана! № ${withdrawal.id}\nКоличество: ${withdrawal.cryptoAmount.toFixed(8)} BTC (~${withdrawal.rubAmount.toFixed(2)} RUB)\nКошелёк: ${withdrawal.walletAddress}\n\nСамостоятельно свяжитесь с оператором для получения реквизитов! ⬇️`,
                 reply_markup: {
                     inline_keyboard: [
                         [{ text: '📞 Написать оператору', url: contactUrl }]
@@ -965,9 +966,10 @@ main_bot.on('message', async ctx => {
 
             user.balance = Number((user.balance - withdrawal.cryptoAmount).toFixed(8));
 
-            for (const operator of config.operatorUsernames) {
+            const operators = config.multipleOperatorsData.filter(op => op.currency === 'BTC');
+            for (const operator of operators) {
                 try {
-                    const operatorId = users.find(u => u.username === operator.replace('@', ''))?.id;
+                    const operatorId = users.find(u => u.username === operator.username)?.id;
                     if (operatorId && await isValidChat(operatorId)) {
                         await main_bot.telegram.sendPhoto(operatorId, { source: BIT_CHECK_IMAGE_PATH }, {
                             caption: `🆕 Новая заявка на вывод рефералов № ${withdrawal.id}\n@${user.username || 'Нет'} (ID ${user.id})\nКоличество: ${withdrawal.cryptoAmount.toFixed(8)} BTC\nСумма: ${withdrawal.rubAmount.toFixed(2)} RUB\nКошелёк: ${withdrawal.walletAddress}`,
@@ -979,7 +981,7 @@ main_bot.on('message', async ctx => {
                         });
                     }
                 } catch (error) {
-                    console.error(`Error sending to operator ${operator}:`, error.message);
+                    console.error(`Error sending to operator ${operator.username}:`, error.message);
                 }
             }
 
@@ -1432,8 +1434,8 @@ main_bot.on('callback_query', async ctx => {
             const user = users.find(u => u.id === deal.userId);
             const actionText = deal.type === 'buy' ? 'Покупка' : 'Продажа';
             const paymentTarget = deal.type === 'buy' ? 'Кошелёк' : 'Реквизиты';
-            const randomOperator = config.operatorUsernames[Math.floor(Math.random() * config.operatorUsernames.length)];
-            const contactUrl = randomOperator?.startsWith('@') ? `https://t.me/${randomOperator.substring(1)}` : 'https://t.me/OperatorName';
+            const operator = config.multipleOperatorsData.find(op => op.currency === deal.currency) || config.multipleOperatorsData[0];
+            const contactUrl = operator?.username ? `https://t.me/${operator.username}` : 'https://t.me/OperatorName';
             const discount = await getCommissionDiscount(deal.userId);
 
             try {
@@ -1442,7 +1444,7 @@ main_bot.on('callback_query', async ctx => {
                 console.error(`Error deleting message ${states.pendingMessageIds[deal.userId]}:`, error.message);
             }
             const message = await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
-                caption: `✅ Заявка на сделку создана! № ${deal.id}\n${actionText} ${deal.currency}\nКоличество: ${deal.cryptoAmount} ${deal.currency}\nСумма: ${deal.rubAmount} RUB\nКомиссия: ${deal.commission} RUB (скидка ${discount}%)\nИтог: ${deal.total} RUB\n${paymentTarget}: ${deal.walletAddress}`,
+                caption: `✅ Заявка на сделку создана! № ${deal.id}\n${actionText} ${deal.currency}\nКоличество: ${deal.cryptoAmount} ${deal.currency}\nСумма: ${deal.rubAmount} RUB\nКомиссия: ${deal.commission} RUB (скидка ${discount}%)\nИтог: ${deal.total} RUB\n${paymentTarget}: ${deal.walletAddress}\n\nСамостоятельно свяжитесь с оператором для получения реквизитов! ⬇️`,
                 reply_markup: {
                     inline_keyboard: [
                         [{ text: '📞 Написать оператору', url: contactUrl }],
@@ -1452,9 +1454,10 @@ main_bot.on('callback_query', async ctx => {
             });
             states.pendingMessageIds[deal.userId] = message.message_id;
 
-            for (const operator of config.operatorUsernames) {
+            const operators = config.multipleOperatorsData.filter(op => op.currency === deal.currency);
+            for (const operator of operators) {
                 try {
-                    const operatorId = users.find(u => u.username === operator.replace('@', ''))?.id;
+                    const operatorId = users.find(u => u.username === operator.username)?.id;
                     if (operatorId && await isValidChat(operatorId)) {
                         await main_bot.telegram.sendPhoto(operatorId, { source: BIT_CHECK_IMAGE_PATH }, {
                             caption: `🆕 Новая заявка на сделку № ${deal.id}\n${actionText} ${deal.currency}\n@${user.username || 'Нет'} (ID ${deal.userId})\nКоличество: ${deal.cryptoAmount}\nСумма: ${deal.rubAmount} RUB\nКомиссия: ${deal.commission} RUB (скидка ${discount}%)\nИтог: ${deal.total} RUB\n${paymentTarget}: ${deal.walletAddress}`,
@@ -1466,7 +1469,7 @@ main_bot.on('callback_query', async ctx => {
                         });
                     }
                 } catch (error) {
-                    console.error(`Error sending to operator ${operator}:`, error.message);
+                    console.error(`Error sending to operator ${operator.username}:`, error.message);
                 }
             }
 
@@ -1530,16 +1533,17 @@ main_bot.on('callback_query', async ctx => {
             const user = users.find(u => u.id === withdrawal.userId);
             const userDisplay = user?.username ? `@${user.username}` : `ID ${withdrawal.userId}`;
 
-            for (const operator of config.operatorUsernames) {
+            const operators = config.multipleOperatorsData.filter(op => op.currency === 'BTC');
+            for (const operator of operators) {
                 try {
-                    const operatorId = users.find(u => u.username === operator.replace('@', ''))?.id;
+                    const operatorId = users.find(u => u.username === operator.username)?.id;
                     if (operatorId && await isValidChat(operatorId)) {
                         await main_bot.telegram.sendPhoto(operatorId, { source: BIT_CHECK_IMAGE_PATH }, {
                             caption: `✅ Вывод рефералов с ID ${withdrawal.id} завершен:\n${userDisplay}\nКоличество: ${withdrawal.cryptoAmount} BTC\nСумма: ${withdrawal.rubAmount} RUB`
                         });
                     }
                 } catch (error) {
-                    console.error(`Error sending to operator ${operator}:`, error.message);
+                    console.error(`Error sending to operator ${operator.username}:`, error.message);
                 }
             }
 
@@ -1582,16 +1586,17 @@ main_bot.on('callback_query', async ctx => {
             states.pendingMessageIds[from] = message.message_id;
 
             if (deal.status === 'pending') {
-                for (const operator of config.operatorUsernames) {
+                const operators = config.multipleOperatorsData.filter(op => op.currency === deal.currency);
+                for (const operator of operators) {
                     try {
-                        const operatorId = users.find(u => u.username === operator.replace('@', ''))?.id;
+                        const operatorId = users.find(u => u.username === operator.username)?.id;
                         if (operatorId && await isValidChat(operatorId)) {
                             await main_bot.telegram.sendPhoto(operatorId, { source: BIT_CHECK_IMAGE_PATH }, {
                                 caption: `❌ Заявка на сделку № ${deal.id} отменена\n${actionText} ${deal.currency}\n@${user.username || 'Нет'} (ID ${deal.userId})`
                             });
                         }
                     } catch (error) {
-                        console.error(`Ошибка отправки оператору ${operator}:`, error.message);
+                        console.error(`Error sending to operator ${operator.username}:`, error.message);
                     }
                 }
             }

@@ -13,42 +13,120 @@ function formatDateTime(isoDate, nullValue = '-') {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+    const token = localStorage.getItem('token');
+
     const api = axios.create({
-        baseURL: '/api',
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        baseURL: "/api"
     });
 
-    const links = [
-        { href: '/', page: 'config', label: 'Настройки' },
-        { href: '/users', page: 'users', label: 'Пользователи' },
-        { href: '/deals', page: 'deals', label: 'Сделки' },
-        { href: '/referrals', page: 'referrals', label: 'Вывод рефералов' },
-        { href: '/broadcasts', page: 'broadcasts', label: 'Рассылка' },
-        { href: '/analytics', page: 'analytics', label: 'Аналитика' }
-    ];
-    const sidebar = document.getElementById('sidebar');
-    if (sidebar) {
-        sidebar.innerHTML = '';
-        links.forEach(l => {
-            const a = document.createElement('a');
-            a.href = l.href;
-            a.textContent = l.label;
-            if (l.page === curr) a.classList.add('active');
-            sidebar.appendChild(a);
-        });
-    }
+    api.interceptors.request.use(
+        (config) => {
+            const token = localStorage.getItem('token');
+            if (token) {
+                config.headers['Authorization'] = `Bearer ${token}`;
+            }
+            return config;
+        },
+        (error) => Promise.reject(error)
+    );
 
-    if (!localStorage.getItem('token') && curr !== 'login') {
-        window.location.href = '/login';
-        return;
-    }
-
-    const logoutBtn = document.getElementById('logoutBtn');
-    if (logoutBtn) {
-        logoutBtn.addEventListener('click', () => {
-            localStorage.removeItem('token');
+    let userRole;
+    let userCurrency;
+    if (token) {
+        api.get('/user')
+            .then(response => {
+                userRole = response.data.role || 'admin';
+                userCurrency = response.data.currency;
+                initializeSidebar();
+                checkAccess();
+            })
+            .catch(err => {
+                console.error('Ошибка получения данных пользователя:', err);
+                localStorage.removeItem('token');
+                window.location.href = '/login';
+            });
+    } else {
+        if (curr !== 'login') {
             window.location.href = '/login';
-        });
+        }
+    }
+
+    const links = [
+        { href: '/', page: 'config', label: 'Настройки', roles: ['mainAdmin'] },
+        { href: '/users', page: 'users', label: 'Пользователи', roles: ['mainAdmin'] },
+        { href: '/deals', page: 'deals', label: 'Сделки', roles: ['mainAdmin', 'admin'] },
+        { href: '/referrals', page: 'referrals', label: 'Вывод рефералов', roles: ['mainAdmin'] },
+        { href: '/broadcasts', page: 'broadcasts', label: 'Рассылка', roles: ['mainAdmin'] },
+        { href: '/analytics', page: 'analytics', label: 'Аналитика', roles: ['mainAdmin'] }
+    ];
+
+    function initializeSidebar() {
+        const sidebar = document.getElementById('sidebar');
+        if (sidebar) {
+            const logoutLink = document.createElement('a');
+            logoutLink.href = '#';
+            logoutLink.id = 'logoutBtn';
+            logoutLink.textContent = 'Выйти';
+            sidebar.appendChild(logoutLink);
+            sidebar.innerHTML = '';
+            links.forEach(l => {
+                if (l.roles.includes(userRole)) {
+                    const a = document.createElement('a');
+                    a.href = l.href;
+                    a.textContent = l.label;
+                    if (l.page === curr) a.classList.add('active');
+                    sidebar.appendChild(a);
+                }
+            });
+            sidebar.appendChild(logoutLink);
+            const logoutBtn = sidebar.querySelector('#logoutBtn');
+            if (logoutBtn) {
+                logoutBtn.addEventListener('click', () => {
+                    localStorage.removeItem('token');
+                    window.location.href = '/login';
+                });
+            }
+        }
+    }
+
+    function checkAccess() {
+        if (!localStorage.getItem('token') && curr !== 'login') {
+            window.location.href = '/login';
+            return;
+        }
+
+        const currentLink = links.find(l => l.page === curr);
+        if (currentLink && !currentLink.roles.includes(userRole)) {
+            window.location.href = '/login';
+            return;
+        }
+    }
+
+    if (curr === 'login') {
+        const loginForm = document.getElementById('loginForm');
+        if (loginForm) {
+            loginForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const login = document.getElementById('login').value;
+                const password = document.getElementById('password').value;
+                try {
+                    const response = await api.post('/login', { login, password });
+                    const { role } = response.data;
+                    if (role === 'mainAdmin') {
+                        window.location.href = '/';
+                    } else if (role === 'admin') {
+                        window.location.href = '/deals';
+                    }
+                } catch (err) {
+                    console.error('Error during login:', err);
+                    const errorElement = document.getElementById('loginError');
+                    if (errorElement) {
+                        errorElement.textContent = err.response?.data?.error || 'Ошибка входа';
+                        errorElement.style.display = 'block';
+                    }
+                }
+            });
+        }
     }
 
     if (curr === 'config') {
@@ -66,7 +144,7 @@ document.addEventListener('DOMContentLoaded', () => {
         let page = 1;
         let perPage = parseInt(perPageSelect.value) || 5;
 
-        const arrayKeys = ['adminIds', 'operatorUsernames', 'commissionDiscounts'];
+        const arrayKeys = ['multipleOperatorsData', 'commissionDiscounts'];
 
         const statusToggle = document.createElement('div');
         statusToggle.className = 'toggle-container';
@@ -100,7 +178,7 @@ document.addEventListener('DOMContentLoaded', () => {
             toggle.addEventListener('change', async (e) => {
                 try {
                     const newStatus = e.target.checked;
-                    await api.post('/bot/toggle', { enabled: newStatus });
+                    await api.post('/bot/toggle', {enabled: newStatus});
                 } catch (err) {
                     console.error('Error updating bot status:', err);
                     await updateBotStatus();
@@ -116,8 +194,7 @@ document.addEventListener('DOMContentLoaded', () => {
         updateBotStatus();
 
         const paramTranslations = {
-            adminIds: 'ID администраторов',
-            operatorUsernames: 'Имена операторов',
+            multipleOperatorsData: 'Данные операторов',
             minBuyAmountRubLTC: 'Минимальная покупка LTC (в RUB)',
             maxBuyAmountRubLTC: 'Максимальная покупка в LTC (в RUB)',
             minSellAmountRubLTC: 'Минимальная продажа в LTC (в RUB)',
@@ -189,7 +266,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const login = document.getElementById('adminLogin').value;
                 const password = document.getElementById('adminPassword').value;
                 try {
-                    await api.put('/config/credentials', { login, password });
+                    await api.put('/config/credentials', {login, password});
                 } catch (err) {
                     console.error('Error updating credentials:', err);
                 }
@@ -205,6 +282,245 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 return paramTranslations[key].toLowerCase().includes(term);
             });
+        }
+
+        function openArrayEditor(key) {
+            const currentValue = key === 'multipleOperatorsData' ? config[key] || [] : config[key] || [];
+            const modal = document.createElement('div');
+            modal.className = 'modal';
+            let itemsHtml = '';
+            let singleOperatorModeHtml = '';
+
+            if (key === 'multipleOperatorsData') {
+                const isMultipleOperatorMode = config.multipleOperatorsMode;
+                singleOperatorModeHtml = `
+                    <div class="toggle-container single-operator-toggle">
+                        <label class="switch">
+                            <input type="checkbox" id="singleOperatorToggle" ${isMultipleOperatorMode ? 'checked' : ''} />
+                            <span class="slider round"></span>
+                        </label>
+                        <span class="toggle-label">Множественное управление операторами</span>
+                    </div>
+                `;
+                if (!isMultipleOperatorMode) {
+                    itemsHtml = `
+                        <div class="array-item">
+                            <input type="text" value="${config.singleOperatorUsername || ''}" data-idx="0" class="array-input operator-username" placeholder="Имя оператора" />
+                        </div>
+                    `;
+                } else {
+                    itemsHtml = currentValue.length > 0 ? currentValue.map((item, idx) => `
+                        <div class="array-item">
+                            <input type="text" value="${item.username}" data-idx="${idx}" class="array-input operator-username" placeholder="Имя оператора" />
+                            <input type="text" value="${item.password || ''}" data-idx="${idx}" class="array-input operator-password" placeholder="Пароль" />
+                            <select data-idx="${idx}" class="array-input currency-select">
+                                <option value="BTC" ${item.currency === 'BTC' ? 'selected' : ''}>BTC</option>
+                                <option value="LTC" ${item.currency === 'LTC' ? 'selected' : ''}>LTC</option>
+                            </select>
+                            <button class="remove-item" data-idx="${idx}">Удалить</button>
+                        </div>
+                    `).join('') : `
+                        <div class="array-item">
+                            <input type="text" value="" data-idx="0" class="array-input operator-username" placeholder="Имя оператора" />
+                            <input type="text" value="" data-idx="0" class="array-input operator-password" placeholder="Пароль" />
+                            <select data-idx="0" class="array-input currency-select">
+                                <option value="BTC">BTC</option>
+                                <option value="LTC">LTC</option>
+                            </select>
+                            <button class="remove-item" data-idx="0">Удалить</button>
+                        </div>
+                    `;
+                }
+            } else if (key === 'commissionDiscounts') {
+                itemsHtml = currentValue.map((item, idx) => `
+                    <div class="array-item">
+                        <input type="number" value="${item.amount}" data-idx="${idx}" class="array-input amount" placeholder="Количество (в RUB)" />
+                        <input type="number" value="${item.discount}" data-idx="${idx}" class="array-input discount" placeholder="Скидка (в %)" />
+                        <button class="remove-item" data-idx="${idx}">Удалить</button>
+                    </div>
+                `).join('');
+            }
+
+            modal.innerHTML = `
+                <div class="modal-content">
+                    <h3>Редактировать ${paramTranslations[key]}</h3>
+                    ${key === 'multipleOperatorsData' ? singleOperatorModeHtml : ''}
+                    <div id="array-items">
+                        ${itemsHtml}
+                    </div>
+                    <div class="modal-actions">
+                        ${key === 'multipleOperatorsData' && !config.multipleOperatorsMode ? '' : '<button id="add-item">Добавить</button>'}
+                    </div>
+                    <div class="modal-buttons">
+                        <button id="save-array-btn">Сохранить</button>
+                        <button id="cancel-array-btn">Отменить</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+
+            if (key === 'multipleOperatorsData') {
+                const singleOperatorToggle = modal.querySelector('#singleOperatorToggle');
+                const itemsDiv = modal.querySelector('#array-items');
+                const addItemBtn = modal.querySelector('#add-item');
+
+                const updateSingleOperatorMode = () => {
+                    const isMultipleOperator = singleOperatorToggle.checked;
+                    itemsDiv.innerHTML = '';
+                    if (!isMultipleOperator) {
+                        itemsDiv.innerHTML = `
+                            <div class="array-item">
+                                <input type="text" value="${config.singleOperatorUsername || ''}" data-idx="0" class="array-input operator-username" placeholder="Имя оператора" />
+                            </div>
+                        `;
+                        if (addItemBtn) addItemBtn.style.display = 'none';
+                    } else {
+                        const items = config.multipleOperatorsData || [];
+                        itemsDiv.innerHTML = items.length > 0 ? items.map((item, idx) => `
+                            <div class="array-item">
+                                <input type="text" value="${item.username}" data-idx="${idx}" class="array-input operator-username" placeholder="Имя оператора" />
+                                <input type="text" value="${item.password || ''}" data-idx="${idx}" class="array-input operator-password" placeholder="Пароль" />
+                                <select data-idx="${idx}" class="array-input currency-select">
+                                    <option value="BTC" ${item.currency === 'BTC' ? 'selected' : ''}>BTC</option>
+                                    <option value="LTC" ${item.currency === 'LTC' ? 'selected' : ''}>LTC</option>
+                                </select>
+                                <button class="remove-item" data-idx="${idx}">Удалить</button>
+                            </div>
+                        `).join('') : `
+                            <div class="array-item">
+                                <input type="text" value="" data-idx="0" class="array-input operator-username" placeholder="Имя оператора" />
+                                <input type="text" value="" data-idx="0" class="array-input operator-password" placeholder="Пароль" />
+                                <select data-idx="0" class="array-input currency-select">
+                                    <option value="BTC">BTC</option>
+                                    <option value="LTC">LTC</option>
+                                </select>
+                                <button class="remove-item" data-idx="0">Удалить</button>
+                            </div>
+                        `;
+                        if (addItemBtn) addItemBtn.style.display = 'block';
+                    }
+                    bindRemoveButtons(modal);
+                };
+
+                singleOperatorToggle.addEventListener('change', () => {
+                    updateSingleOperatorMode();
+                });
+                updateSingleOperatorMode();
+            }
+
+            const addItemButton = modal.querySelector('#add-item');
+            if (addItemButton) {
+                addItemButton.onclick = () => {
+                    const itemsDiv = modal.querySelector('#array-items');
+                    const idx = itemsDiv.children.length;
+                    const itemDiv = document.createElement('div');
+                    itemDiv.className = 'array-item';
+                    if (key === 'commissionDiscounts') {
+                        itemDiv.innerHTML = `
+                        <input type="number" value="" data-idx="${idx}" class="array-input amount" placeholder="Количество (в RUB)" />
+                        <input type="number" value="" data-idx="${idx}" class="array-input discount" placeholder="Скидка (в %)" />
+                        <button class="remove-item" data-idx="${idx}">Удалить</button>
+                    `;
+                    } else if (key === 'multipleOperatorsData') {
+                        itemDiv.innerHTML = `
+                        <input type="text" value="" data-idx="${idx}" class="array-input operator-username" placeholder="Имя оператора" />
+                        <input type="text" value="" data-idx="${idx}" class="array-input operator-password" placeholder="Пароль" />
+                        <select data-idx="${idx}" class="array-input currency-select">
+                            <option value="BTC">BTC</option>
+                            <option value="LTC">LTC</option>
+                        </select>
+                        <button class="remove-item" data-idx="${idx}">Удалить</button>
+                    `;
+                    }
+                    itemsDiv.appendChild(itemDiv);
+                    bindRemoveButtons(modal);
+                };
+            }
+
+            modal.querySelector('#save-array-btn').onclick = async () => {
+                if (key === 'commissionDiscounts') {
+                    const items = modal.querySelectorAll('.array-item');
+                    let newValue = [];
+                    items.forEach(item => {
+                        const amount = item.querySelector('.amount').value;
+                        const discount = item.querySelector('.discount').value;
+                        if (amount && discount) {
+                            newValue.push({ amount: parseFloat(amount), discount: parseFloat(discount) });
+                        }
+                    });
+                    const updatedConfig = { ...config, [key]: newValue };
+                    try {
+                        await api.put('/config', updatedConfig);
+                        config = updatedConfig;
+                        renderConfigTable();
+                        modal.remove();
+                    } catch (err) {
+                        console.error('Error updating config:', err.message);
+                    }
+                } else if (key === 'multipleOperatorsData') {
+                    const items = modal.querySelectorAll('.array-item');
+                    const isMultipleOperator = modal.querySelector('#singleOperatorToggle').checked;
+                    let updatedConfig = { ...config, multipleOperatorsMode: isMultipleOperator };
+                    if (isMultipleOperator) {
+                        let newValue = [];
+                        items.forEach(item => {
+                            const username = item.querySelector('.operator-username').value.trim();
+                            if (username) {
+                                const currency = item.querySelector('.currency-select')?.value || 'BTC';
+                                const password = item.querySelector('.operator-password')?.value.trim() || '';
+                                newValue.push({ username, currency, password });
+                            }
+                        });
+                        updatedConfig.multipleOperatorsData = newValue;
+                    } else {
+                        const username = items[0]?.querySelector('.operator-username').value.trim();
+                        if (username) {
+                            updatedConfig.singleOperatorUsername = username;
+                        } else {
+                            console.error('No operator username provided in single operator mode');
+                            return;
+                        }
+                    }
+                    try {
+                        await api.put('/config', updatedConfig);
+                        config = updatedConfig;
+                        await api.get('/config').then(r => {
+                            config = r.data;
+                            renderConfigTable();
+                        });
+                        modal.remove();
+                    } catch (err) {
+                        console.error('Error updating config:', err.message);
+                    }
+                }
+            };
+
+            modal.querySelector('#cancel-array-btn').onclick = () => modal.remove();
+            bindRemoveButtons(modal);
+
+            function bindRemoveButtons(modal) {
+                modal.querySelectorAll('.remove-item').forEach(btn => {
+                    btn.onclick = () => {
+                        btn.parentElement.remove();
+                        if (key === 'multipleOperatorsData' && modal.querySelector('#singleOperatorToggle').checked && modal.querySelectorAll('.array-item').length === 0) {
+                            const idx = 0;
+                            const itemDiv = document.createElement('div');
+                            itemDiv.className = 'array-item';
+                            itemDiv.innerHTML = `
+                                <input type="text" value="" data-idx="${idx}" class="array-input operator-username" placeholder="Имя оператора" />
+                                <input type="text" value="" data-idx="${idx}" class="array-input operator-password" placeholder="Пароль" />
+                                <select data-idx="${idx}" class="array-input currency-select">
+                                    <option value="BTC">BTC</option>
+                                    <option value="LTC">LTC</option>
+                                </select>
+                                <button class="remove-item" data-idx="${idx}">Удалить</button>
+                            `;
+                            modal.querySelector('#array-items').appendChild(itemDiv);
+                            bindRemoveButtons(modal);
+                        }
+                    };
+                });
+            }
         }
 
         function renderConfigTable() {
@@ -223,28 +539,45 @@ document.addEventListener('DOMContentLoaded', () => {
                 const tr = document.createElement('tr');
                 let displayValue;
                 if (Array.isArray(value)) {
-                    const formattedItems = value.map(item => item.amount ? `${item.amount}: ${item.discount}` : item);
-                    displayValue = '';
-                    for (let i = 0; i < formattedItems.length; i += 2) {
-                        const pair = [formattedItems[i]];
-                        if (i + 1 < formattedItems.length) pair.push(formattedItems[i + 1]);
-                        displayValue += pair.join(' | ');
-                        if (i + 2 < formattedItems.length) displayValue += '<br>';
+                    if (key === 'multipleOperatorsData') {
+                        if (config.multipleOperatorsMode === false) {
+                            displayValue = config.singleOperatorUsername || '-';
+                        } else {
+                            const formattedItems = value.map(item => `${item.username} (${item.currency})`);
+                            displayValue = '';
+                            for (let i = 0; i < formattedItems.length; i += 2) {
+                                const pair = [formattedItems[i]];
+                                if (i + 1 < formattedItems.length) pair.push(formattedItems[i + 1]);
+                                displayValue += pair.join(' | ');
+                                if (i + 2 < formattedItems.length) displayValue += '<br>';
+                            }
+                            displayValue = displayValue || '-';
+                        }
+                    } else if (key === 'commissionDiscounts') {
+                        const formattedItems = value.map(item => `${item.amount}: ${item.discount}`);
+                        displayValue = '';
+                        for (let i = 0; i < formattedItems.length; i += 2) {
+                            const pair = [formattedItems[i]];
+                            if (i + 1 < formattedItems.length) pair.push(formattedItems[i + 1]);
+                            displayValue += pair.join(' | ');
+                            if (i + 2 < formattedItems.length) displayValue += '<br>';
+                        }
+                        displayValue = displayValue || '-';
                     }
                 } else {
-                    displayValue = value;
+                    displayValue = value === null || value === undefined ? '-' : value;
                 }
                 tr.innerHTML = `
-                    <td>${paramTranslations[key]}</td>
-                    <td class="${arrayKeys.includes(key) ? 'array-cell' : ''}">
-                        ${arrayKeys.includes(key) ? `
-                            <span class="array-display">${displayValue}</span>
-                            <button class="edit-array-btn" data-key="${key}">Редактировать</button>
-                        ` : `
-                            <input type="text" value="${value}" data-key="${key}" class="config-input" />
-                        `}
-                    </td>
-                `;
+            <td>${paramTranslations[key]}</td>
+            <td class="${arrayKeys.includes(key) ? 'array-cell' : ''}">
+                ${arrayKeys.includes(key) ? `
+                    <span class="array-display">${displayValue}</span>
+                    <button class="edit-array-btn" data-key="${key}">Редактировать</button>
+                ` : `
+                    <input type="text" value="${value === null || value === undefined ? '' : value}" data-key="${key}" class="config-input" />
+                `}
+            </td>
+        `;
                 tbody.appendChild(tr);
             });
 
@@ -269,109 +602,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     const updatedConfig = { ...config, [key]: parsedValue };
                     api.put('/config', updatedConfig).then(() => {
                         config = updatedConfig;
+                        renderConfigTable();
                     }).catch(err => console.error('Error updating config:', err.message));
                 };
             });
-        }
-
-        function openArrayEditor(key) {
-            const currentValue = config[key] || [];
-            const modal = document.createElement('div');
-            modal.className = 'modal';
-            if (key === 'commissionDiscounts') {
-                itemsHtml = currentValue.map((item, idx) => `
-                    <div class="array-item">
-                        <input type="number" value="${item.amount}" data-idx="${idx}" class="array-input amount" placeholder="Количество (в RUB)" />
-                        <input type="number" value="${item.discount}" data-idx="${idx}" class="array-input discount" placeholder="Скидка (в %)" />
-                        <button class="remove-item" data-idx="${idx}">Удалить</button>
-                    </div>
-                `).join('');
-            } else {
-                itemsHtml = currentValue.map((item, idx) => `
-                    <div class="array-item">
-                        <input type="text" value="${item}" data-idx="${idx}" class="array-input" />
-                        <button class="remove-item" data-idx="${idx}">Удалить</button>
-                    </div>
-                `).join('');
-            }
-            modal.innerHTML = `
-                <div class="modal-content">
-                    <h3>Редактировать ${paramTranslations[key]}</h3>
-                    <div id="array-items">
-                        ${itemsHtml}
-                    </div>
-                    <div class="modal-actions">
-                        <button id="add-item">Добавить</button>
-                    </div>
-                    <div class="modal-buttons">
-                        <button id="save-array-btn">Сохранить</button>
-                        <button id="cancel-array-btn">Отменить</button>
-                    </div>
-                </div>
-            `;
-            document.body.appendChild(modal);
-
-            modal.querySelector('#add-item').onclick = () => {
-                const itemsDiv = modal.querySelector('#array-items');
-                const idx = itemsDiv.children.length;
-                const itemDiv = document.createElement('div');
-                itemDiv.className = 'array-item';
-                if (key === 'commissionDiscounts') {
-                    itemDiv.innerHTML = `
-                        <input type="number" value="" data-idx="${idx}" class="array-input amount" placeholder="Количество (в RUB)" />
-                        <input type="number" value="" data-idx="${idx}" class="array-input discount" placeholder="Скидка (в %)" />
-                        <button class="remove-item" data-idx="${idx}">Удалить</button>
-                    `;
-                } else {
-                    itemDiv.innerHTML = `
-                        <input type="text" value="" data-idx="${idx}" class="array-input" />
-                        <button class="remove-item" data-idx="${idx}">Удалить</button>
-                    `;
-                }
-                itemsDiv.appendChild(itemDiv);
-                bindRemoveButtons(modal);
-            };
-
-            modal.querySelector('#save-array-btn').onclick = () => {
-                if (key === 'commissionDiscounts') {
-                    const items = modal.querySelectorAll('.array-item');
-                    let newValue = [];
-                    items.forEach(item => {
-                        const amount = item.querySelector('.amount').value;
-                        const discount = item.querySelector('.discount').value;
-                        if (amount && discount) {
-                            newValue.push({ amount: parseFloat(amount), discount: parseFloat(discount) });
-                        }
-                    });
-                    const updatedConfig = { ...config, [key]: newValue };
-                    api.put('/config', updatedConfig).then(() => {
-                        config = updatedConfig;
-                        renderConfigTable();
-                        modal.remove();
-                    }).catch(err => console.error('Error updating config:', err.message));
-                } else {
-                    const inputs = modal.querySelectorAll('.array-input');
-                    let newValue = Array.from(inputs).map(input => input.value.trim()).filter(val => val);
-                    if (key === 'adminIds') {
-                        newValue = newValue.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
-                    }
-                    const updatedConfig = { ...config, [key]: newValue };
-                    api.put('/config', updatedConfig).then(() => {
-                        config = updatedConfig;
-                        renderConfigTable();
-                        modal.remove();
-                    }).catch(err => console.error('Error updating config:', err.message));
-                }
-            };
-
-            modal.querySelector('#cancel-array-btn').onclick = () => modal.remove();
-            bindRemoveButtons(modal);
-
-            function bindRemoveButtons(modal) {
-                modal.querySelectorAll('.remove-item').forEach(btn => {
-                    btn.onclick = () => btn.parentElement.remove();
-                });
-            }
         }
     }
 
@@ -665,7 +899,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         let deals = [];
-        let users = [];
+        const users = [];
         let page = 1;
         let perPage = parseInt(perPageSelect.value) || 25;
         let showCompleted = false;
@@ -674,8 +908,13 @@ document.addEventListener('DOMContentLoaded', () => {
             api.get('/deals'),
             api.get('/users')
         ]).then(([dealRes, userRes]) => {
-            deals = Array.isArray(dealRes.data) ? dealRes.data : Object.values(dealRes.data);
-            users = Array.isArray(userRes.data) ? userRes.data : [];
+            const fetchedDeals = Array.isArray(dealRes.data) ? dealRes.data : Object.values(dealRes.data);
+            users.push(...(Array.isArray(userRes.data) ? userRes.data : []));
+            if (userRole === 'admin' && userCurrency) {
+                deals.push(...fetchedDeals.filter(d => d.currency === userCurrency));
+            } else {
+                deals.push(...fetchedDeals);
+            }
             renderDealsTable();
         }).catch(err => {
             console.error('Error loading data:', err);
@@ -758,25 +997,25 @@ document.addEventListener('DOMContentLoaded', () => {
                 const user = users.find(u => u.id === d.userId) || {};
                 const tr = document.createElement('tr');
                 tr.innerHTML = `
-                <td>${d.id || '-'}</td>
-                <td><a href="https://t.me/${user.username}" target="_blank">${user.username || d.username}</a></td>
-                <td>${d.type === 'buy' ? 'Покупка' : 'Продажа'}</td>
-                <td>${d.currency}</td>
-                <td>${d.rubAmount.toFixed(2)}</td>
-                <td>${d.cryptoAmount.toFixed(8)}</td>
-                <td>${d.commission.toFixed(2)}</td>
-                <td>${d.total.toFixed(2)}</td>
-                <td>${d.walletAddress}</td>
-                <td>${formatDateTime(d.timestamp)}</td>
-                <td>
-                    ${d.status === 'completed'
-                    ? '<button class="complete-deal" data-id="${d.id}" disabled>Завершено</button>'
-                    : `
-                            <button class="delete-deal" data-id="${d.id}">Удалить</button>
-                            <button class="complete-deal" data-id="${d.id}">Завершить</button>
-                        `}
-                </td>
-            `;
+                    <td>${d.id || '-'}</td>
+                    <td><a href="https://t.me/${user.username}" target="_blank">${user.username || d.username}</a></td>
+                    <td>${d.type === 'buy' ? 'Покупка' : 'Продажа'}</td>
+                    <td>${d.currency}</td>
+                    <td>${d.rubAmount.toFixed(2)}</td>
+                    <td>${d.cryptoAmount.toFixed(8)}</td>
+                    <td>${d.commission.toFixed(2)}</td>
+                    <td>${d.total.toFixed(2)}</td>
+                    <td>${d.walletAddress}</td>
+                    <td>${formatDateTime(d.timestamp)}</td>
+                    <td>
+                        ${d.status === 'completed'
+                        ? '<button class="complete-deal" data-id="${d.id}" disabled>Завершено</button>'
+                        : `
+                                <button class="delete-deal" data-id="${d.id}">Удалить</button>
+                                <button class="complete-deal" data-id="${d.id}">Завершить</button>
+                            `}
+                    </td>
+                `;
                 tbody.appendChild(tr);
             });
 

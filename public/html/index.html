@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Настройки</title>
     <link rel="stylesheet" href="/css/styles.css">
+    <link rel="icon" type="image/x-icon" href="https://cdn3.iconfinder.com/data/icons/human-resource-management-set-2/64/2-08-1024.png">
 </head>
 <body>
 <div class="container">
@@ -17,10 +18,7 @@
         <a href="/analytics">Аналитика</a>
     </nav>
     <main>
-        <div class="header">
-            <h1>Настройки</h1>
-            <button id="logoutBtn" class="logout-btn">Выйти из системы</button>
-        </div>
+        <h1>Настройки</h1>
         <section class="form-container">
             <h2>Учетные данные</h2>
             <form id="credentialsForm">
@@ -54,9 +52,9 @@
                 <tbody></tbody>
             </table>
             <div class="pagination">
-                <button id="prevPage">< Назад</button>
+                <button id="prevPage" disabled>< Назад</button>
                 <span id="pageInfo"></span>
-                <button id="nextPage">Вперед ></button>
+                <button id="nextPage" disabled>Вперед ></button>
             </div>
         </section>
     </main>

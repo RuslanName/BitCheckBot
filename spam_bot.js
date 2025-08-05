@@ -1,7 +1,29 @@
 const { Telegraf } = require('telegraf');
-const fs = require('fs');
+const fs = require('fs-extra'); // Используем fs-extra для fs.readJsonSync и fs.writeJsonSync
 const path = require('path');
 require('dotenv').config();
+
+function loadJson(name) {
+    const filePath = path.join(process.env.DATA_PATH, 'database', `${name}.json`);
+    try {
+        if (!fs.existsSync(filePath)) {
+            return [];
+        }
+        return fs.readJsonSync(filePath);
+    } catch (err) {
+        console.error(`Error loading ${name}.json:`, err.message);
+        return [];
+    }
+}
+
+function saveJson(name, data) {
+    try {
+        const filePath = path.join(process.env.DATA_PATH, 'database', `${name}.json`);
+        fs.writeJsonSync(filePath, data, { spaces: 2 });
+    } catch (err) {
+        console.error(`Error saving ${name}.json:`, err.message);
+    }
+}
 
 const logStream = fs.createWriteStream(path.join(__dirname, 'spam_bot.log'), { flags: 'a' });
 const log = (...args) => {
@@ -14,7 +36,7 @@ const bot = new Telegraf(process.env.SPAM_BOT_TOKEN, {
     telegram: { webhookReply: false },
 });
 
-const imagePath = path.join(__dirname, 'public/images/bit-check-image.png');
+const imagePath = path.join(__dirname, 'data/images/bit-check-image.png');
 if (!fs.existsSync(imagePath)) {
     log(`Error: Image file not found at ${imagePath}`);
     process.exit(1);
@@ -58,24 +80,39 @@ bot.on('message', async (ctx) => {
 
             if (/оператор/i.test(messageText)) {
                 try {
+                    // Загружаем конфигурацию при каждом вызове
+                    const config = loadJson('config');
+                    if (!config) {
+                        log(`Error: Failed to load config for chatId=${chatId}, userId=${ctx.from.id}`);
+                        return;
+                    }
+
+                    let inlineKeyboard = [];
+                    if (config.multipleOperatorsMode) {
+                        inlineKeyboard = config.multipleOperatorsData.map(operator => [{
+                            text: `Написать оператору ${operator.currency}`,
+                            url: `https://t.me/${operator.username}`,
+                        }]);
+                    } else {
+                        inlineKeyboard = [[
+                            {
+                                text: 'Написать оператору',
+                                url: `https://t.me/${config.singleOperatorUsername}`,
+                            },
+                        ]];
+                    }
+
                     const sentMessage = await ctx.replyWithPhoto(
                         { source: imagePath },
                         {
                             caption: 'Для связи с оператором:',
                             reply_markup: {
-                                inline_keyboard: [
-                                    [
-                                        {
-                                            text: 'Написать оператору',
-                                            url: 'https://t.me/BitCheck_exchange',
-                                        },
-                                    ],
-                                ],
+                                inline_keyboard: inlineKeyboard,
                             },
                         }
                     );
                     const sentMessageId = sentMessage.message_id;
-                    log(`Sent message with icon and button: chatId=${chatId}, messageId=${sentMessageId}, userId=${ctx.from.id}`);
+                    log(`Sent message with operator buttons: chatId=${chatId}, messageId=${sentMessageId}, userId=${ctx.from.id}`);
 
                     setTimeout(async () => {
                         try {
@@ -86,13 +123,13 @@ bot.on('message', async (ctx) => {
                         }
                     }, 30 * 1000);
                 } catch (error) {
-                    log(`Error sending image with button: chatId=${chatId}, userId=${ctx.from.id}, error=${error.message}`);
+                    log(`Error sending image with operator buttons: chatId=${chatId}, userId=${ctx.from.id}, error=${error.message}`);
                 }
             }
 
             const linkRegex = /(?:t\.me\/|telegram\.me\/|tg:\/\/)[^\s]+/i;
             if (linkRegex.test(messageText)) {
-                const allowedLink = 't.me/Bit_check1_bot';
+                const allowedLink = 't.me/BitCheck_bot';
                 if (messageText.includes(allowedLink)) {
                     log(`Allowed link ${allowedLink}: userId=${ctx.from.id}`);
                 } else {
@@ -120,7 +157,7 @@ bot.on('message', async (ctx) => {
                         await ctx.telegram.deleteMessage(chatId, messageId).catch((err) => {
                             log(`Error deleting message with username: chatId=${chatId}, messageId=${messageId}, error=${err.message}`);
                         });
-                        log(`Deleted message with disallowed username: chatId=${chatId}, messageId=${messageId}, userId=${ctx.from.id}, usernames=${usnames.join(',')}`);
+                        log(`Deleted message with disallowed username: chatId=${chatId}, messageId=${messageId}, userId=${ctx.from.id}, usernames=${usernames.join(',')}`);
                     } else {
                         log(`Username allowed from admin: userId=${ctx.from.id}, usernames=${usernames.join(',')}`);
                     }

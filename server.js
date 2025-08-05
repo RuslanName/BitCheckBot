@@ -88,7 +88,16 @@ function sendHtmlFile(res, filePath) {
 
 function authenticateToken(req, res, next) {
     const token = req.headers['authorization']?.split(' ')[1];
-    if (!token) return res.status(401).json({ error: 'Токен не предоставлен' });
+
+    console.log(req.url);
+    console.log(token);
+
+    if (!token) {
+        if (req.originalUrl === '/') {
+            return res.redirect('/login');
+        }
+        return res.status(401).json({ error: 'Токен не предоставлен' });
+    }
 
     jwt.verify(token, JWT_SECRET, (err, user) => {
         if (err) return res.status(403).json({ error: 'Недействительный токен' });
@@ -97,47 +106,103 @@ function authenticateToken(req, res, next) {
     });
 }
 
-app.use((req, res, next) => {
-    console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
-    next();
-});
+function restrictTo(...roles) {
+    return (req, res, next) => {
+        if (!roles.includes(req.user.role)) {
+            return res.status(403).json({ error: 'Доступ запрещен' });
+        }
+        next();
+    };
+}
 
 app.post('/api/login', (req, res) => {
     const { login, password } = req.body;
     const config = loadJson('config');
 
-    if (login === config.login && password === config.password) {
-        const token = jwt.sign({ login }, JWT_SECRET, { expiresIn: '1h' });
-        return res.json({ token });
+    if (config.multipleOperatorsMode === false) {
+        if (login === config.adminLogin && password === config.adminPassword) {
+            const token = jwt.sign({ login, role: 'mainAdmin' }, JWT_SECRET, { expiresIn: '1h' });
+            return res.json({ token, role: 'mainAdmin' });
+        } else {
+            return res.status(401).json({ error: 'В одиночном режиме доступ разрешен только главному администратору' });
+        }
     }
+
+    if (login === config.adminLogin && password === config.adminPassword) {
+        const token = jwt.sign({ login, role: 'mainAdmin' }, JWT_SECRET, { expiresIn: '1h' });
+        return res.json({ token, role: 'mainAdmin' });
+    }
+
+    let operatorUsername = login.startsWith('@') ? login.substring(1) : login;
+    const operatorData = config.multipleOperatorsData || [];
+
+    const users = loadJson('users');
+    const user = users.find(u => u.username === operatorUsername);
+    if (user) {
+        operatorUsername = user.username;
+    }
+
+    const operator = operatorData.find(a => a.username === operatorUsername && a.password === password);
+    if (operator) {
+        const token = jwt.sign({ login: operatorUsername, role: 'admin', currency: operator.currency }, JWT_SECRET, { expiresIn: '1h' });
+        return res.json({ token, role: 'admin', currency: operator.currency });
+    }
+
     res.status(401).json({ error: 'Неверный логин или пароль' });
 });
 
-app.get('/api/config', authenticateToken, (req, res) => {
+app.get('/api/user', authenticateToken, (req, res) => {
+    try {
+        res.json({
+            role: req.user.role,
+            currency: req.user.currency || null
+        });
+    } catch (err) {
+        console.error('Ошибка получения данных пользователя:', err.message);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+app.get('/api/config', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
     const config = loadJson('config');
-    const { login, password, ...restConfig } = config;
+    const { adminLogin, adminPassword, ...restConfig } = config;
     res.json(restConfig);
 });
 
-app.get('/api/config/credentials', authenticateToken, (req, res) => {
+app.get('/api/config/credentials', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
     const config = loadJson('config');
-    res.json({ login: config.login, password: config.password });
+    res.json({ login: config.adminLogin, password: config.adminPassword });
 });
 
-app.put('/api/config', authenticateToken, (req, res) => {
+app.put('/api/config', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
     const cfg = loadJson('config');
-    const { login, password } = cfg;
-    const updatedConfig = { ...cfg, ...req.body, login, password };
+    const { adminLogin, adminPassword } = cfg;
+    const updatedConfig = {
+        ...cfg,
+        ...req.body,
+        adminLogin,
+        adminPassword,
+        multipleOperatorsData: req.body.multipleOperatorsData ? req.body.multipleOperatorsData.map(item => {
+            if (typeof item === 'object' && item.username) {
+                return {
+                    username: item.username,
+                    currency: item.currency || 'BTC',
+                    password: item.password || ''
+                };
+            }
+            return { username: item, currency: 'BTC', password: '' };
+        }) : cfg.multipleOperatorsData
+    };
     saveJson('config', updatedConfig);
     res.json(updatedConfig);
 });
 
-app.put('/api/config/credentials', authenticateToken, (req, res) => {
+app.put('/api/config/credentials', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
     const { login, password } = req.body;
     const cfg = loadJson('config');
     if (login && password) {
-        cfg.login = login;
-        cfg.password = password;
+        cfg.adminLogin = login;
+        cfg.adminPassword = password;
         saveJson('config', cfg);
         res.json({ message: 'Логин и пароль обновлены' });
     } else {
@@ -145,11 +210,11 @@ app.put('/api/config/credentials', authenticateToken, (req, res) => {
     }
 });
 
-app.get('/api/bot/status', authenticateToken, (req, res) => {
+app.get('/api/bot/status', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
     res.json({ botEnabled: getBotStatus() });
 });
 
-app.post('/api/bot/toggle', authenticateToken, (req, res) => {
+app.post('/api/bot/toggle', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
     const { enabled } = req.body;
 
     if (typeof enabled !== 'boolean') {
@@ -168,11 +233,11 @@ app.post('/api/bot/toggle', authenticateToken, (req, res) => {
     });
 });
 
-app.get('/api/users', authenticateToken, (req, res) => {
+app.get('/api/users', (req, res) => {
     res.json(loadJson('users'));
 });
 
-app.put('/api/users/:id', authenticateToken, (req, res) => {
+app.put('/api/users/:id', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
     const users = loadJson('users');
     const idx = users.findIndex(u => u.id === +req.params.id);
     if (idx !== -1) {
@@ -183,7 +248,7 @@ app.put('/api/users/:id', authenticateToken, (req, res) => {
     res.sendStatus(404);
 });
 
-app.delete('/api/users/:id', authenticateToken, (req, res) => {
+app.delete('/api/users/:id', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
     try {
         let users = loadJson('users');
         const userId = parseInt(req.params.id, 10);
@@ -216,6 +281,9 @@ app.get('/api/deals', authenticateToken, (req, res) => {
     if (!Array.isArray(data)) {
         data = Object.values(data);
     }
+    if (req.user.role === 'admin') {
+        data = data.filter(d => d.currency === req.user.currency);
+    }
     res.json(data);
 });
 
@@ -228,6 +296,9 @@ app.post('/api/deals', authenticateToken, (req, res) => {
         rubAmount: req.body.rubAmount || req.body.amount,
         userId: req.body.userId || req.body.chatId
     };
+    if (req.user.role === 'admin' && item.currency !== req.user.currency) {
+        return res.status(403).json({ error: 'Недопустимая валюта для вашего аккаунта' });
+    }
     list.push(item);
     saveJson('deals', list);
     res.status(201).json(item);
@@ -239,6 +310,9 @@ app.patch('/api/deals/:id/complete', authenticateToken, async (req, res) => {
         const idx = deals.findIndex(d => d.id === req.params.id);
         if (idx === -1) {
             return res.sendStatus(404);
+        }
+        if (req.user.role === 'admin' && deals[idx].currency !== req.user.currency) {
+            return res.status(403).json({ error: 'Недопустимая валюта для вашего аккаунта' });
         }
 
         deals[idx] = { ...deals[idx], status: 'completed' };
@@ -317,6 +391,13 @@ app.patch('/api/deals/:id/complete', authenticateToken, async (req, res) => {
 app.delete('/api/deals/:id', authenticateToken, (req, res) => {
     try {
         let deals = loadJson('deals');
+        const deal = deals.find(d => d.id === req.params.id);
+        if (!deal) {
+            return res.sendStatus(404);
+        }
+        if (req.user.role === 'admin' && deal.currency !== req.user.currency) {
+            return res.status(403).json({ error: 'Недопустимая валюта для вашего аккаунта' });
+        }
         deals = deals.filter(d => d.id !== req.params.id);
         saveJson('deals', deals);
         res.sendStatus(204);
@@ -326,7 +407,7 @@ app.delete('/api/deals/:id', authenticateToken, (req, res) => {
     }
 });
 
-app.get('/api/broadcasts', authenticateToken, (req, res) => {
+app.get('/api/broadcasts', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
     try {
         res.json(loadJson('broadcasts'));
     } catch (err) {
@@ -335,7 +416,7 @@ app.get('/api/broadcasts', authenticateToken, (req, res) => {
     }
 });
 
-app.post('/api/broadcasts', authenticateToken, upload.single('image'), (req, res) => {
+app.post('/api/broadcasts', authenticateToken, restrictTo('mainAdmin'), upload.single('image'), (req, res) => {
     try {
         const list = loadJson('broadcasts') || [];
         const item = {
@@ -359,7 +440,7 @@ app.post('/api/broadcasts', authenticateToken, upload.single('image'), (req, res
     }
 });
 
-app.delete('/api/broadcasts/:id', authenticateToken, (req, res) => {
+app.delete('/api/broadcasts/:id', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
     try {
         let list = loadJson('broadcasts');
         const broadcast = list.find(x => x.id === req.params.id);
@@ -376,7 +457,7 @@ app.delete('/api/broadcasts/:id', authenticateToken, (req, res) => {
     }
 });
 
-app.get('/api/withdrawals', authenticateToken, (req, res) => {
+app.get('/api/withdrawals', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
     try {
         let data = loadJson('withdrawals');
         if (!Array.isArray(data)) {
@@ -389,7 +470,7 @@ app.get('/api/withdrawals', authenticateToken, (req, res) => {
     }
 });
 
-app.post('/api/withdrawals', authenticateToken, (req, res) => {
+app.post('/api/withdrawals', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
     try {
         const list = loadJson('withdrawals');
         const item = {
@@ -408,7 +489,7 @@ app.post('/api/withdrawals', authenticateToken, (req, res) => {
     }
 });
 
-app.patch('/api/withdrawals/:id/complete', authenticateToken, async (req, res) => {
+app.patch('/api/withdrawals/:id/complete', authenticateToken, restrictTo('mainAdmin'), async (req, res) => {
     try {
         let withdrawals = loadJson('withdrawals');
         const idx = withdrawals.findIndex(w => w.id === req.params.id);
