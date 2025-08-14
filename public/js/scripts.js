@@ -144,7 +144,14 @@ document.addEventListener('DOMContentLoaded', () => {
         let page = 1;
         let perPage = parseInt(perPageSelect.value) || 5;
 
-        const arrayKeys = ['multipleOperatorsData', 'commissionDiscounts'];
+        const arrayKeys = [
+            'multipleOperatorsData',
+            'commissionDiscounts',
+            'buyCommissionScalePercentBTC',
+            'sellCommissionScalePercentBTC',
+            'buyCommissionScalePercentLTC',
+            'sellCommissionScalePercentLTC'
+        ];
 
         const statusToggle = document.createElement('div');
         statusToggle.className = 'toggle-container';
@@ -195,20 +202,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const paramTranslations = {
             multipleOperatorsData: 'Данные операторов',
-            minBuyAmountRubLTC: 'Минимальная покупка LTC (в RUB)',
-            maxBuyAmountRubLTC: 'Максимальная покупка в LTC (в RUB)',
-            minSellAmountRubLTC: 'Минимальная продажа в LTC (в RUB)',
-            maxSellAmountRubLTC: 'Максимальная продажа в LTC (в RUB)',
             minBuyAmountRubBTC: 'Минимальная покупка в BTC (в RUB)',
             maxBuyAmountRubBTC: 'Максимальная покупка в BTC (в RUB)',
             minSellAmountRubBTC: 'Минимальная продажа в BTC (в RUB)',
             maxSellAmountRubBTC: 'Максимальная продажа в BTC (в RUB)',
-            commissionBuyRateLTC: 'Комиссия при покупке LTC (в RUB)',
-            commissionBuyRateBTC: 'Комиссия при покупке BTC (в RUB)',
-            commissionSellRateLTC: 'Комиссия при продаже LTC',
-            commissionSellRateBTC: 'Комиссия при продаже BTC',
-            referralCommissionRate: "Процент рефералам",
-            commissionDiscounts: 'Скидки на комиссию'
+            minBuyAmountRubLTC: 'Минимальная покупка LTC (в RUB)',
+            maxBuyAmountRubLTC: 'Максимальная покупка в LTC (в RUB)',
+            minSellAmountRubLTC: 'Минимальная продажа в LTC (в RUB)',
+            maxSellAmountRubLTC: 'Максимальная продажа в LTC (в RUB)',
+            buyCommissionScalePercentBTC: 'Процент комиссия при покупке BTC',
+            sellCommissionScalePercentBTC: 'Процент комиссии при продаже BTC',
+            buyCommissionScalePercentLTC: 'Процент комиссии при покупке LTC',
+            sellCommissionScalePercentLTC: 'Процент комиссии при продаже LTC',
+            referralRevenuePercent: "Процент выручки рефералов",
+            commissionDiscounts: 'Процент скидки на комиссию'
         };
 
         api.get('/config').then(r => {
@@ -285,7 +292,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         function openArrayEditor(key) {
-            const currentValue = key === 'multipleOperatorsData' ? config[key] || [] : config[key] || [];
+            const currentValue = config[key] || [];
             const modal = document.createElement('div');
             modal.className = 'modal';
             let itemsHtml = '';
@@ -331,14 +338,24 @@ document.addEventListener('DOMContentLoaded', () => {
                         </div>
                     `;
                 }
-            } else if (key === 'commissionDiscounts') {
-                itemsHtml = currentValue.map((item, idx) => `
+            } else if (key === 'commissionDiscounts' ||
+                key === 'buyCommissionScalePercentBTC' ||
+                key === 'sellCommissionScalePercentBTC' ||
+                key === 'buyCommissionScalePercentLTC' ||
+                key === 'sellCommissionScalePercentLTC') {
+                itemsHtml = currentValue.length > 0 ? currentValue.map((item, idx) => `
                     <div class="array-item">
                         <input type="number" value="${item.amount}" data-idx="${idx}" class="array-input amount" placeholder="Количество (в RUB)" />
-                        <input type="number" value="${item.discount}" data-idx="${idx}" class="array-input discount" placeholder="Скидка (в %)" />
+                        <input type="number" value="${item[key.includes('Commission') ? 'commission' : 'discount']}" data-idx="${idx}" class="array-input ${key.includes('Commission') ? 'commission' : 'discount'}" placeholder="${key.includes('Commission') ? 'Комиссия (в %)' : 'Скидка (в %)'}"/>
                         <button class="remove-item" data-idx="${idx}">Удалить</button>
                     </div>
-                `).join('');
+                `).join('') : `
+                    <div class="array-item">
+                        <input type="number" value="" data-idx="0" class="array-input amount" placeholder="Количество (в RUB)" />
+                        <input type="number" value="" data-idx="0" class="array-input ${key.includes('Commission') ? 'commission' : 'discount'}" placeholder="${key.includes('Commission') ? 'Комиссия (в %)' : 'Скидка (в %)'}"/>
+                        <button class="remove-item" data-idx="0">Удалить</button>
+                    </div>
+                `;
             }
 
             modal.innerHTML = `
@@ -415,22 +432,26 @@ document.addEventListener('DOMContentLoaded', () => {
                     const idx = itemsDiv.children.length;
                     const itemDiv = document.createElement('div');
                     itemDiv.className = 'array-item';
-                    if (key === 'commissionDiscounts') {
+                    if (key === 'commissionDiscounts' ||
+                        key === 'buyCommissionScalePercentBTC' ||
+                        key === 'sellCommissionScalePercentBTC' ||
+                        key === 'buyCommissionScalePercentLTC' ||
+                        key === 'sellCommissionScalePercentLTC') {
                         itemDiv.innerHTML = `
-                        <input type="number" value="" data-idx="${idx}" class="array-input amount" placeholder="Количество (в RUB)" />
-                        <input type="number" value="" data-idx="${idx}" class="array-input discount" placeholder="Скидка (в %)" />
-                        <button class="remove-item" data-idx="${idx}">Удалить</button>
-                    `;
+                            <input type="number" value="" data-idx="${idx}" class="array-input amount" placeholder="Количество (в RUB)" />
+                            <input type="number" value="" data-idx="${idx}" class="array-input ${key.includes('Commission') ? 'commission' : 'discount'}" placeholder="${key.includes('Commission') ? 'Комиссия (в %)' : 'Скидка (в %)'}"/>
+                            <button class="remove-item" data-idx="${idx}">Удалить</button>
+                        `;
                     } else if (key === 'multipleOperatorsData') {
                         itemDiv.innerHTML = `
-                        <input type="text" value="" data-idx="${idx}" class="array-input operator-username" placeholder="Имя оператора" />
-                        <input type="text" value="" data-idx="${idx}" class="array-input operator-password" placeholder="Пароль" />
-                        <select data-idx="${idx}" class="array-input currency-select">
-                            <option value="BTC">BTC</option>
-                            <option value="LTC">LTC</option>
-                        </select>
-                        <button class="remove-item" data-idx="${idx}">Удалить</button>
-                    `;
+                            <input type="text" value="" data-idx="${idx}" class="array-input operator-username" placeholder="Имя оператора" />
+                            <input type="text" value="" data-idx="${idx}" class="array-input operator-password" placeholder="Пароль" />
+                            <select data-idx="${idx}" class="array-input currency-select">
+                                <option value="BTC">BTC</option>
+                                <option value="LTC">LTC</option>
+                            </select>
+                            <button class="remove-item" data-idx="${idx}">Удалить</button>
+                        `;
                     }
                     itemsDiv.appendChild(itemDiv);
                     bindRemoveButtons(modal);
@@ -438,71 +459,67 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             modal.querySelector('#save-array-btn').onclick = async () => {
-                if (key === 'commissionDiscounts') {
-                    const items = modal.querySelectorAll('.array-item');
-                    let newValue = [];
-                    items.forEach(item => {
-                        const amount = item.querySelector('.amount').value;
-                        const discount = item.querySelector('.discount').value;
-                        if (amount && discount) {
-                            newValue.push({ amount: parseFloat(amount), discount: parseFloat(discount) });
-                        }
-                    });
-                    const updatedConfig = { ...config, [key]: newValue };
-                    try {
-                        await api.put('/config', updatedConfig);
-                        config = updatedConfig;
-                        renderConfigTable();
-                        modal.remove();
-                    } catch (err) {
-                        console.error('Error updating config:', err.message);
-                    }
-                } else if (key === 'multipleOperatorsData') {
-                    const items = modal.querySelectorAll('.array-item');
-                    const isMultipleOperator = modal.querySelector('#singleOperatorToggle').checked;
-                    let updatedConfig = { ...config, multipleOperatorsMode: isMultipleOperator };
-                    if (isMultipleOperator) {
-                        let newValue = [];
-                        items.forEach(item => {
-                            const username = item.querySelector('.operator-username').value.trim();
-                            if (username) {
-                                const currency = item.querySelector('.currency-select')?.value || 'BTC';
-                                const password = item.querySelector('.operator-password')?.value.trim() || '';
-                                newValue.push({ username, currency, password });
-                            }
-                        });
-                        updatedConfig.multipleOperatorsData = newValue;
-                    } else {
-                        const username = items[0]?.querySelector('.operator-username').value.trim();
+                const itemsDiv = modal.querySelector('#array-items');
+                const singleOperatorToggle = modal.querySelector('#singleOperatorToggle');
+                const updatedConfig = { ...config };
+
+                if (key === 'multipleOperatorsData') {
+                    const isMultipleOperator = singleOperatorToggle ? singleOperatorToggle.checked : config.multipleOperatorsMode;
+                    updatedConfig.multipleOperatorsMode = isMultipleOperator;
+                    if (!isMultipleOperator) {
+                        const username = itemsDiv.querySelector('.array-input.operator-username')?.value.trim();
                         if (username) {
                             updatedConfig.singleOperatorUsername = username;
+                            updatedConfig.multipleOperatorsData = [];
                         } else {
                             console.error('No operator username provided in single operator mode');
                             return;
                         }
-                    }
-                    try {
-                        await api.put('/config', updatedConfig);
-                        config = updatedConfig;
-                        await api.get('/config').then(r => {
-                            config = r.data;
-                            renderConfigTable();
+                    } else {
+                        const items = Array.from(itemsDiv.children).map(item => {
+                            const username = item.querySelector('.operator-username').value.trim();
+                            const password = item.querySelector('.operator-password')?.value.trim() || '';
+                            const currency = item.querySelector('.currency-select')?.value || 'BTC';
+                            return { username, password, currency };
                         });
-                        modal.remove();
-                    } catch (err) {
-                        console.error('Error updating config:', err.message);
+                        updatedConfig.multipleOperatorsData = items.filter(item => item.username);
                     }
+                } else if (key === 'commissionDiscounts' ||
+                    key === 'buyCommissionScalePercentBTC' ||
+                    key === 'sellCommissionScalePercentBTC' ||
+                    key === 'buyCommissionScalePercentLTC' ||
+                    key === 'sellCommissionScalePercentLTC') {
+                    const items = Array.from(itemsDiv.children).map(item => {
+                        const amount = parseFloat(item.querySelector('.amount').value);
+                        const value = parseFloat(item.querySelector(key.includes('Commission') ? '.commission' : '.discount').value);
+                        return {
+                            amount: isNaN(amount) ? 0 : amount,
+                            [key.includes('Commission') ? 'commission' : 'discount']: isNaN(value) ? 0 : value
+                        };
+                    });
+                    updatedConfig[key] = items.filter(item => item.amount && (item[key.includes('Commission') ? 'commission' : 'discount']));
+                }
+
+                try {
+                    await api.put('/config', updatedConfig);
+                    config = updatedConfig;
+                    await api.get('/config').then(r => {
+                        config = r.data;
+                        renderConfigTable();
+                    });
+                    modal.remove();
+                } catch (err) {
+                    console.error('Error updating config:', err.message);
                 }
             };
 
             modal.querySelector('#cancel-array-btn').onclick = () => modal.remove();
-            bindRemoveButtons(modal);
 
             function bindRemoveButtons(modal) {
                 modal.querySelectorAll('.remove-item').forEach(btn => {
                     btn.onclick = () => {
                         btn.parentElement.remove();
-                        if (key === 'multipleOperatorsData' && modal.querySelector('#singleOperatorToggle').checked && modal.querySelectorAll('.array-item').length === 0) {
+                        if (key === 'multipleOperatorsData' && modal.querySelector('#singleOperatorToggle')?.checked && modal.querySelectorAll('.array-item').length === 0) {
                             const idx = 0;
                             const itemDiv = document.createElement('div');
                             itemDiv.className = 'array-item';
@@ -521,6 +538,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     };
                 });
             }
+
+            bindRemoveButtons(modal);
         }
 
         function renderConfigTable() {
@@ -553,8 +572,12 @@ document.addEventListener('DOMContentLoaded', () => {
                             }
                             displayValue = displayValue || '-';
                         }
-                    } else if (key === 'commissionDiscounts') {
-                        const formattedItems = value.map(item => `${item.amount}: ${item.discount}`);
+                    } else if (key === 'commissionDiscounts' ||
+                        key === 'buyCommissionScalePercentBTC' ||
+                        key === 'sellCommissionScalePercentBTC' ||
+                        key === 'buyCommissionScalePercentLTC' ||
+                        key === 'sellCommissionScalePercentLTC') {
+                        const formattedItems = value.map(item => `${item.amount}: ${item[key.includes('Commission') ? 'commission' : 'discount']}`);
                         displayValue = '';
                         for (let i = 0; i < formattedItems.length; i += 2) {
                             const pair = [formattedItems[i]];
@@ -568,16 +591,16 @@ document.addEventListener('DOMContentLoaded', () => {
                     displayValue = value === null || value === undefined ? '-' : value;
                 }
                 tr.innerHTML = `
-            <td>${paramTranslations[key]}</td>
-            <td class="${arrayKeys.includes(key) ? 'array-cell' : ''}">
-                ${arrayKeys.includes(key) ? `
-                    <span class="array-display">${displayValue}</span>
-                    <button class="edit-array-btn" data-key="${key}">Редактировать</button>
-                ` : `
-                    <input type="text" value="${value === null || value === undefined ? '' : value}" data-key="${key}" class="config-input" />
-                `}
-            </td>
-        `;
+                    <td>${paramTranslations[key]}</td>
+                    <td class="${arrayKeys.includes(key) ? 'array-cell' : ''}">
+                        ${arrayKeys.includes(key) ? `
+                            <span class="array-display">${displayValue}</span>
+                            <button class="edit-array-btn" data-key="${key}">Редактировать</button>
+                        ` : `
+                            <input type="text" value="${value === null || value === undefined ? '' : value}" data-key="${key}" class="config-input" />
+                        `}
+                    </td>
+                `;
                 tbody.appendChild(tr);
             });
 

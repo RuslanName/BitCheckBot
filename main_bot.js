@@ -325,6 +325,24 @@ async function getCommissionDiscount(userId) {
     }
 }
 
+async function calculateCommission(amount, currency, type) {
+    const config = loadJson('config');
+    const commissionScale = type === 'buy'
+        ? (currency === 'BTC' ? config.buyCommissionScalePercentBTC : config.buyCommissionScalePercentLTC)
+        : (currency === 'BTC' ? config.sellCommissionScalePercentBTC : config.sellCommissionScalePercentLTC);
+
+    let commissionPercent = commissionScale[0].commission;
+    for (const scale of commissionScale) {
+        if (amount >= scale.amount) {
+            commissionPercent = scale.commission;
+        } else {
+            break;
+        }
+    }
+
+    return (amount * commissionPercent) / 100;
+}
+
 function calculateUserStats(userId) {
     const deals = loadJson('deals');
     const userDeals = deals.filter(d => d.userId === userId && d.status === 'completed');
@@ -570,7 +588,7 @@ main_bot.hears('💰 Купить', async ctx => {
     const maxLTCAmount = (config.maxBuyAmountRubLTC / priceLTC).toFixed(8);
     states.pendingBuy[ctx.from.id] = { currency: null, messageId: null };
     const message = await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
-        caption: `💰 Выберите валюту:\n💲BTC\nМин: ${config.minBuyAmountRubBTC} RUB (~${minBTCAmount} BTC)\nМакс: ${config.maxBuyAmountRubBTC} RUB (~${maxBTCAmount} BTC)\n💲LTC\nМин: ${config.minBuyAmountRubLTC} RUB (~${minLTCAmount} LTC)\nМакс: ${config.maxBuyAmountRubLTC} RUB (~${maxLTCAmount} LTC)\n${Date.now() - lastPriceUpdate > CACHE_DURATION ? '⚠️ Курс может быть устаревшим' : ''}`,
+        caption: `💰 Выберите валюту:\n💵 BTC\nМин: ${config.minBuyAmountRubBTC} RUB (~${minBTCAmount} BTC)\nМакс: ${config.maxBuyAmountRubBTC} RUB (~${maxBTCAmount} BTC)\n💵 LTC\nМин: ${config.minBuyAmountRubLTC} RUB (~${minLTCAmount} LTC)\nМакс: ${config.maxBuyAmountRubLTC} RUB (~${maxLTCAmount} LTC)\n${Date.now() - lastPriceUpdate > CACHE_DURATION ? '⚠️ Курс может быть устаревшим' : ''}`,
         reply_markup: {
             inline_keyboard: [
                 [{ text: 'BTC', callback_data: 'buy_select_btc' }],
@@ -601,7 +619,7 @@ main_bot.hears('💸 Продать', async ctx => {
     const maxLTCAmount = (config.maxSellAmountRubLTC / priceLTC).toFixed(8);
     states.pendingSell[ctx.from.id] = { currency: null, messageId: null };
     const message = await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
-        caption: `💸 Выберите валюту:\n💲BTC\nМин: ${config.minSellAmountRubBTC} RUB (~${minBTCAmount} BTC)\nМакс: ${config.maxSellAmountRubBTC} RUB (~${maxBTCAmount} BTC)\n💲LTC\nМин: ${config.minSellAmountRubLTC} RUB (~${minLTCAmount} LTC)\nМакс: ${config.maxSellAmountRubLTC} RUB (~${maxLTCAmount} LTC)\n${Date.now() - lastPriceUpdate > CACHE_DURATION ? '⚠️ Курс может быть устаревшим' : ''}`,
+        caption: `💸 Выберите валюту:\n💵 BTC\nМин: ${config.minSellAmountRubBTC} RUB (~${minBTCAmount} BTC)\nМакс: ${config.maxSellAmountRubBTC} RUB (~${maxBTCAmount} BTC)\n💵 LTC\nМин: ${config.minSellAmountRubLTC} RUB (~${minLTCAmount} LTC)\nМакс: ${config.maxSellAmountRubLTC} RUB (~${maxLTCAmount} LTC)\n${Date.now() - lastPriceUpdate > CACHE_DURATION ? '⚠️ Курс может быть устаревшим' : ''}`,
         reply_markup: {
             inline_keyboard: [
                 [{ text: 'BTC', callback_data: 'sell_select_btc' }],
@@ -720,7 +738,6 @@ main_bot.on('message', async ctx => {
             let isCryptoInput = false, amount, rub;
             const currency = states.pendingBuy[id].currency;
             const price = currency === 'BTC' ? await getBtcRubPrice() : await getLtcRubPrice();
-            const baseCommissionRate = currency === 'BTC' ? config.commissionBuyRateBTC : config.commissionBuyRateLTC;
             const minBuyAmountRub = currency === 'BTC' ? config.minBuyAmountRubBTC : config.minBuyAmountRubLTC;
             const maxBuyAmountRub = currency === 'BTC' ? config.maxBuyAmountRubBTC : config.maxBuyAmountRubLTC;
             const minLTCAmount = (config.minBuyAmountRubLTC / await getLtcRubPrice()).toFixed(8);
@@ -744,19 +761,19 @@ main_bot.on('message', async ctx => {
             }
 
             if (currency === 'BTC') {
-                isCryptoInput = inputValue < 1;
+                mied = inputValue < 1;
             } else if (currency === 'LTC') {
-                isCryptoInput = inputValue < 1000;
+                isCryptoInput = inputValue < 100;
             }
 
             const discount = await getCommissionDiscount(id);
-            const effectiveCommissionRate = baseCommissionRate * (1 - discount / 100);
+            const commission = await calculateCommission(isCryptoInput ? inputValue * price : inputValue, currency, 'buy');
+            const effectiveCommission = Math.round(commission * (1 - discount / 100));
 
             if (isCryptoInput) {
                 amount = inputValue;
                 rub = amount * price;
-                const commission = Math.round(rub * effectiveCommissionRate);
-                const total = rub + commission;
+                const total = rub + effectiveCommission;
                 if (rub < minBuyAmountRub || rub > maxBuyAmountRub) {
                     try {
                         await ctx.deleteMessage(states.pendingMessageIds[id]);
@@ -773,12 +790,11 @@ main_bot.on('message', async ctx => {
                 }
                 states.pendingBuy[id].amount = amount;
                 states.pendingBuy[id].rub = rub;
-                states.pendingBuy[id].commission = commission;
+                states.pendingBuy[id].commission = effectiveCommission;
                 states.pendingBuy[id].total = total;
             } else {
                 rub = inputValue;
-                const commission = Math.round(rub * effectiveCommissionRate);
-                const total = rub + commission;
+                const total = rub + effectiveCommission;
                 if (rub < minBuyAmountRub || rub > maxBuyAmountRub) {
                     try {
                         await ctx.deleteMessage(states.pendingMessageIds[id]);
@@ -796,7 +812,7 @@ main_bot.on('message', async ctx => {
                 amount = rub / price;
                 states.pendingBuy[id].amount = amount;
                 states.pendingBuy[id].rub = rub;
-                states.pendingBuy[id].commission = commission;
+                states.pendingBuy[id].commission = effectiveCommission;
                 states.pendingBuy[id].total = total;
             }
 
@@ -831,7 +847,6 @@ main_bot.on('message', async ctx => {
             let isCryptoInput = false, amount, rubBefore;
             const currency = states.pendingSell[id].currency;
             const price = currency === 'BTC' ? await getBtcRubPrice() : await getLtcRubPrice();
-            const baseCommissionRate = currency === 'BTC' ? config.commissionSellRateBTC : config.commissionSellRateLTC;
             const minSellAmountRub = currency === 'BTC' ? config.minSellAmountRubBTC : config.minSellAmountRubLTC;
             const maxSellAmountRub = currency === 'BTC' ? config.maxSellAmountRubBTC : config.maxSellAmountRubLTC;
             const minLTCAmount = (config.minSellAmountRubLTC / await getLtcRubPrice()).toFixed(8);
@@ -861,7 +876,8 @@ main_bot.on('message', async ctx => {
             }
 
             const discount = await getCommissionDiscount(id);
-            const effectiveCommissionRate = baseCommissionRate * (1 - discount / 100);
+            const commission = await calculateCommission(isCryptoInput ? inputValue * price : inputValue, currency, 'sell');
+            const effectiveCommission = Math.round(commission * (1 - discount / 100));
 
             if (isCryptoInput) {
                 amount = inputValue;
@@ -871,8 +887,7 @@ main_bot.on('message', async ctx => {
                 amount = rubBefore / price;
             }
 
-            const commission = Math.round(rubBefore * effectiveCommissionRate);
-            const rubAfter = rubBefore - commission;
+            const rubAfter = rubBefore - effectiveCommission;
 
             if (rubBefore < minSellAmountRub || rubBefore > maxSellAmountRub) {
                 try {
@@ -884,8 +899,7 @@ main_bot.on('message', async ctx => {
                     caption: `Мин: ${minSellAmountRub} RUB (~${minBTCAmount} BTC, ~${minLTCAmount} LTC)\nМакс: ${maxSellAmountRub} RUB (~${maxBTCAmount} BTC, ~${maxLTCAmount} LTC)`
                 });
                 states.pendingMessageIds[id] = message.message_id;
-                clearPendingStates(id);
-
+                clearPendingStates(states, id);
                 saveJson('states', states);
                 return;
             }
@@ -900,7 +914,7 @@ main_bot.on('message', async ctx => {
                 currency,
                 amount,
                 rub: rubAfter,
-                commission,
+                commission: effectiveCommission,
                 rubBefore
             };
             const message = await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
@@ -1133,7 +1147,7 @@ main_bot.on('callback_query', async ctx => {
                 second: '2-digit',
                 timeZone: 'Europe/Moscow'
             });
-            const profileText = `👤 Твой профиль в BitCheck\n📛 Имя: ${username}\n🆔 ID: ${userId}\n\n📦 Статистика:\n🔄 Сделок совершено: ${stats.dealsCount}\n👥 Приведено рефералов: ${(user.referrals || []).length}\n💸 Реферальный заработок: ${(user.balance).toFixed(8)} BTC (~ ${earningsRub.toFixed(2)} RUB)\n\n📥 Куплено:\n₿ BTC: ${stats.boughtBTC.rub.toFixed(2)} RUB (${stats.boughtBTC.crypto.toFixed(8)} BTC)\nŁ LTC: ${stats.boughtLTC.rub.toFixed(2)} RUB (${stats.boughtLTC.crypto.toFixed(8)} LTC)\n\n📤 Продано:\n₿ BTC: ${stats.soldBTC.rub.toFixed(2)} RUB (${stats.soldBTC.crypto.toFixed(8)} BTC)\nŁ LTC: ${stats.soldLTC.rub.toFixed(2)} RUB (${stats.soldLTC.crypto.toFixed(8)} LTC)\n\n🔗 Твоя ссылка:\n👉 ${referralLink}\n\n💰 Приглашайте друзей и получайте бонусы!\n🚀 BitCheck — твой надёжный обменник для покупки и продажи Bitcoin и Litecoin!\n\n🕒 Обновлено: ${timestamp}`;
+            const profileText = `👤 Твой профиль в BitCheck\n📛 Имя: ${username}\n🆔 ID: ${userId}\n\n📦 Статистика:\n🔄 Сделок совершено: ${stats.dealsCount}\n👥 Приведено рефералов: ${(user.referrals || []).length}\n💸 Реферальный заработок: ${(user.balance).toFixed(8)} BTC (~ ${earningsRub.toFixed(2)} RUB)\n\n📥 Куплено:\n💵 BTC: ${stats.boughtBTC.rub.toFixed(2)} RUB (${stats.boughtBTC.crypto.toFixed(8)} BTC)\nŁ LTC: ${stats.boughtLTC.rub.toFixed(2)} RUB (${stats.boughtLTC.crypto.toFixed(8)} LTC)\n\n📤 Продано:\n💵 BTC: ${stats.soldBTC.rub.toFixed(2)} RUB (${stats.soldBTC.crypto.toFixed(8)} BTC)\nŁ LTC: ${stats.soldLTC.rub.toFixed(2)} RUB (${stats.soldLTC.crypto.toFixed(8)} LTC)\n\n🔗 Твоя ссылка:\n👉 ${referralLink}\n\n💰 Приглашайте друзей и получайте бонусы!\n🚀 BitCheck — твой надёжный обменник для покупки и продажи Bitcoin и Litecoin!\n\n🕒 Обновлено: ${timestamp}`;
 
             try {
                 await ctx.editMessageCaption(profileText, {
@@ -1244,7 +1258,7 @@ main_bot.on('callback_query', async ctx => {
                 const earningsRub = user.balance * priceBTC;
                 const username = user.username ? `@${user.username}` : 'Нет';
                 const referralLink = `https://t.me/${ctx.botInfo.username}?start=ref_${user.referralId}`;
-                const profileText = `👤 Твой профиль в BitCheck\n📛 Имя: ${username}\n🆔 ID: ${from}\n\n📦 Статистика:\n🔄 Сделок совершено: ${stats.dealsCount}\n👥 Приведено рефералов: ${(user.referrals || []).length}\n💸 Реферальный заработок: ${(user.balance).toFixed(8)} BTC (~ ${earningsRub.toFixed(2)} RUB)\n\n📥 Куплено:\n₿ BTC: ${stats.boughtBTC.rub.toFixed(2)} RUB (${stats.boughtBTC.crypto.toFixed(8)} BTC)\nŁ LTC: ${stats.boughtLTC.rub.toFixed(2)} RUB (${stats.boughtLTC.crypto.toFixed(8)} LTC)\n\n📤 Продано:\n₿ BTC: ${stats.soldBTC.rub.toFixed(2)} RUB (${stats.soldBTC.crypto.toFixed(8)} BTC)\nŁ LTC: ${stats.soldLTC.rub.toFixed(2)} RUB (${stats.soldLTC.crypto.toFixed(8)} LTC)\n\n🔗 Твоя ссылка:\n👉 ${referralLink}\n\n💰 Приглашайте друзей и получайте бонусы!\n🚀 BitCheck — твой надёжный обменник для покупки и продажи Bitcoin и Litecoin!`;
+                const profileText = `👤 Твой профиль в BitCheck\n📛 Имя: ${username}\n🆔 ID: ${from}\n\n📦 Статистика:\n🔄 Сделок совершено: ${stats.dealsCount}\n👥 Приведено рефералов: ${(user.referrals || []).length}\n💸 Реферальный заработок: ${(user.balance).toFixed(8)} BTC (~ ${earningsRub.toFixed(2)} RUB)\n\n📥 Куплено:\n💵 BTC: ${stats.boughtBTC.rub.toFixed(2)} RUB (${stats.boughtBTC.crypto.toFixed(8)} BTC)\nŁ LTC: ${stats.boughtLTC.rub.toFixed(2)} RUB (${stats.boughtLTC.crypto.toFixed(8)} LTC)\n\n📤 Продано:\n💵 BTC: ${stats.soldBTC.rub.toFixed(2)} RUB (${stats.soldBTC.crypto.toFixed(8)} BTC)\nŁ LTC: ${stats.soldLTC.rub.toFixed(2)} RUB (${stats.soldLTC.crypto.toFixed(8)} LTC)\n\n🔗 Твоя ссылка:\n👉 ${referralLink}\n\n💰 Приглашайте друзей и получайте бонусы!\n🚀 BitCheck — твой надёжный обменник для покупки и продажи Bitcoin и Litecoin!`;
 
                 await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
                     caption: profileText,
@@ -1429,6 +1443,10 @@ main_bot.on('callback_query', async ctx => {
 
             const deal = deals[dealIndex];
             deal.status = 'pending';
+            const commission = await calculateCommission(deal.rubAmount, deal.currency, deal.type);
+            const discount = await getCommissionDiscount(deal.userId);
+            deal.commission = commission * (1 - discount / 100);
+            deal.total = deal.rubAmount + deal.commission;
             deals[dealIndex] = deal;
 
             const user = users.find(u => u.id === deal.userId);
@@ -1436,7 +1454,6 @@ main_bot.on('callback_query', async ctx => {
             const paymentTarget = deal.type === 'buy' ? 'Кошелёк' : 'Реквизиты';
             const operator = config.multipleOperatorsData.find(op => op.currency === deal.currency) || config.multipleOperatorsData[0];
             const contactUrl = operator?.username ? `https://t.me/${operator.username}` : 'https://t.me/OperatorName';
-            const discount = await getCommissionDiscount(deal.userId);
 
             try {
                 await ctx.deleteMessage(states.pendingMessageIds[deal.userId]);
@@ -1444,7 +1461,7 @@ main_bot.on('callback_query', async ctx => {
                 console.error(`Error deleting message ${states.pendingMessageIds[deal.userId]}:`, error.message);
             }
             const message = await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
-                caption: `✅ Заявка на сделку создана! № ${deal.id}\n${actionText} ${deal.currency}\nКоличество: ${deal.cryptoAmount} ${deal.currency}\nСумма: ${deal.rubAmount} RUB\nКомиссия: ${deal.commission} RUB (скидка ${discount}%)\nИтог: ${deal.total} RUB\n${paymentTarget}: ${deal.walletAddress}\n\nСамостоятельно свяжитесь с оператором для получения реквизитов! ⬇️`,
+                caption: `✅ Заявка на сделку создана! № ${deal.id}\n${actionText} ${deal.currency}\nКоличество: ${deal.cryptoAmount} ${deal.currency}\nСумма: ${deal.rubAmount} RUB\nКомиссия: ${deal.commission.toFixed(2)} RUB (скидка ${discount}%)\nИтог: ${deal.total.toFixed(2)} RUB\n${paymentTarget}: ${deal.walletAddress}\n\nСамостоятельно свяжитесь с оператором для получения реквизитов! ⬇️`,
                 reply_markup: {
                     inline_keyboard: [
                         [{ text: '📞 Написать оператору', url: contactUrl }],
@@ -1460,7 +1477,7 @@ main_bot.on('callback_query', async ctx => {
                     const operatorId = users.find(u => u.username === operator.username)?.id;
                     if (operatorId && await isValidChat(operatorId)) {
                         await main_bot.telegram.sendPhoto(operatorId, { source: BIT_CHECK_IMAGE_PATH }, {
-                            caption: `🆕 Новая заявка на сделку № ${deal.id}\n${actionText} ${deal.currency}\n@${user.username || 'Нет'} (ID ${deal.userId})\nКоличество: ${deal.cryptoAmount}\nСумма: ${deal.rubAmount} RUB\nКомиссия: ${deal.commission} RUB (скидка ${discount}%)\nИтог: ${deal.total} RUB\n${paymentTarget}: ${deal.walletAddress}`,
+                            caption: `🆕 Новая заявка на сделку № ${deal.id}\n${actionText} ${deal.currency}\n@${user.username || 'Нет'} (ID ${deal.userId})\nКоличество: ${deal.cryptoAmount}\nСумма: ${deal.rubAmount} RUB\nКомиссия: ${deal.commission.toFixed(2)} RUB (скидка ${discount}%)\nИтог: ${deal.total.toFixed(2)} RUB\n${paymentTarget}: ${deal.walletAddress}`,
                             reply_markup: {
                                 inline_keyboard: [
                                     [{ text: '📞 Написать пользователю', url: user.username ? `https://t.me/${user.username}` : `https://t.me/id${deal.userId}` }]
@@ -1489,7 +1506,7 @@ main_bot.on('callback_query', async ctx => {
                     console.error(`Error deleting message ${states.pendingMessageIds[from]}:`, error.message);
                 }
                 const message = await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
-                    caption: `❌ Заявка на вывод с ID ${withdrawalId} не найдена`
+                    caption: `❌ Заявка на вывод № ${withdrawalId} не найдена`
                 });
                 states.pendingMessageIds[from] = message.message_id;
                 await ctx.answerCbQuery('Заявка не найдена', { show_alert: false });
@@ -1508,7 +1525,7 @@ main_bot.on('callback_query', async ctx => {
                 console.error(`Error deleting message ${states.pendingMessageIds[from]}:`, error.message);
             }
             const message = await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
-                caption: `❌ Заявка на вывод с ID ${withdrawal.id} отменена`
+                caption: `❌ Заявка на вывод № ${withdrawal.id} отменена`
             });
             states.pendingMessageIds[from] = message.message_id;
             await ctx.answerCbQuery('Заявка отменена', { show_alert: false });
@@ -1539,7 +1556,7 @@ main_bot.on('callback_query', async ctx => {
                     const operatorId = users.find(u => u.username === operator.username)?.id;
                     if (operatorId && await isValidChat(operatorId)) {
                         await main_bot.telegram.sendPhoto(operatorId, { source: BIT_CHECK_IMAGE_PATH }, {
-                            caption: `✅ Вывод рефералов с ID ${withdrawal.id} завершен:\n${userDisplay}\nКоличество: ${withdrawal.cryptoAmount} BTC\nСумма: ${withdrawal.rubAmount} RUB`
+                            caption: `✅ Вывод рефералов № ${withdrawal.id} завершен:\n${userDisplay}\nКоличество: ${withdrawal.cryptoAmount} BTC\nСумма: ${withdrawal.rubAmount} RUB`
                         });
                     }
                 } catch (error) {
@@ -1562,7 +1579,7 @@ main_bot.on('callback_query', async ctx => {
                     console.error(`Ошибка удаления сообщения ${states.pendingMessageIds[from]}:`, error.message);
                 }
                 const message = await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
-                    caption: `❌ Заявка с ID ${dealId} не найдена`
+                    caption: `❌ Заявка № ${dealId} не найдена`
                 });
                 states.pendingMessageIds[from] = message.message_id;
                 await ctx.answerCbQuery('Заявка не найдена', { show_alert: false });
@@ -1581,7 +1598,7 @@ main_bot.on('callback_query', async ctx => {
                 console.error(`Ошибка удаления сообщения ${states.pendingMessageIds[from]}:`, error.message);
             }
             const message = await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
-                caption: `❌ Заявка с ID ${deal.id} отменена`
+                caption: `❌ Заявка № ${deal.id} отменена`
             });
             states.pendingMessageIds[from] = message.message_id;
 

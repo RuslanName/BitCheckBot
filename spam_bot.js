@@ -1,5 +1,5 @@
 const { Telegraf } = require('telegraf');
-const fs = require('fs-extra'); // Используем fs-extra для fs.readJsonSync и fs.writeJsonSync
+const fs = require('fs-extra');
 const path = require('path');
 require('dotenv').config();
 
@@ -13,15 +13,6 @@ function loadJson(name) {
     } catch (err) {
         console.error(`Error loading ${name}.json:`, err.message);
         return [];
-    }
-}
-
-function saveJson(name, data) {
-    try {
-        const filePath = path.join(process.env.DATA_PATH, 'database', `${name}.json`);
-        fs.writeJsonSync(filePath, data, { spaces: 2 });
-    } catch (err) {
-        console.error(`Error saving ${name}.json:`, err.message);
     }
 }
 
@@ -80,7 +71,6 @@ bot.on('message', async (ctx) => {
 
             if (/оператор/i.test(messageText)) {
                 try {
-                    // Загружаем конфигурацию при каждом вызове
                     const config = loadJson('config');
                     if (!config) {
                         log(`Error: Failed to load config for chatId=${chatId}, userId=${ctx.from.id}`);

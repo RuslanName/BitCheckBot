@@ -89,9 +89,6 @@ function sendHtmlFile(res, filePath) {
 function authenticateToken(req, res, next) {
     const token = req.headers['authorization']?.split(' ')[1];
 
-    console.log(req.url);
-    console.log(token);
-
     if (!token) {
         if (req.originalUrl === '/') {
             return res.redirect('/login');
@@ -321,69 +318,68 @@ app.patch('/api/deals/:id/complete', authenticateToken, async (req, res) => {
         const deal = deals[idx];
         const userId = deal.userId;
         const actionText = deal.type === 'buy' ? 'Покупка' : 'Продажа';
-        const caption = `✅ Сделка завершена! №${deal.id}\n${actionText} ${deal.currency}\nКоличество: ${deal.cryptoAmount} ${deal.currency}\nСумма: ${deal.rubAmount} RUB\nКомиссия: ${deal.commission} Rub\nИтог: ${deal.total} RUB\nКошелёк: ${deal.walletAddress}`;
+        const caption = `✅ Сделка завершена! №${deal.id}\n${actionText} ${deal.currency}\nКоличество: ${deal.cryptoAmount} ${deal.currency}\nСумма: ${deal.rubAmount} RUB\nКомиссия: ${deal.commission} RUB\nИтог: ${deal.total} RUB\nКошелёк: ${deal.walletAddress}`;
 
         const config = loadJson('config');
-        const randomOperator = config.operatorUsernames[Math.floor(Math.random() * config.operatorUsernames.length)];
-        const contactUrl = randomOperator?.startsWith('@') ? `https://t.me/${randomOperator.substring(1)}` : 'https://t.me/OperatorName';
+        const users = loadJson('users');
 
-        await (async () => {
+        try {
+            const operators = config.multipleOperatorsData.filter(op => op.currency === deal.currency);
+            const operator = operators[0] || config.multipleOperatorsData[0];
+            const contactUrl = operator?.username ? `https://t.me/${operator.username}` : 'https://t.me/OperatorName';
+
+            const form = new FormData();
+            form.append('chat_id', userId);
+            form.append('photo', fs.createReadStream(path.join(process.env.DATA_PATH, 'images/bit-check-image.png')));
+            form.append('caption', caption);
+            form.append('reply_markup', JSON.stringify({
+                inline_keyboard: [
+                    [{ text: '📞 Написать оператору', url: contactUrl }],
+                ]
+            }));
+            await axios.post(`${TELEGRAM_API}/sendPhoto`, form, {
+                headers: form.getHeaders(),
+                timeout: 5000
+            });
+        } catch (error) {
+            console.error(`Error sending notification to user ${userId}:`, error.message);
+        }
+
+        const referrer = users.find(u => u.referrals && u.referrals.includes(deal.userId));
+        if (referrer) {
+            const referralRevenuePercent = config.referralRevenuePercent / 100;
+            const btcPrice = await (async () => {
+                try {
+                    const response = await axios.get('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=rub', { timeout: 5000 });
+                    return response.data.bitcoin.rub || 5000000;
+                } catch (error) {
+                    console.error('Error fetching BTC price:', error.message);
+                    return 5000000;
+                }
+            })();
+            const commissionBTC = (deal.commission / btcPrice) * referralRevenuePercent;
+            const earningsRub = commissionBTC * btcPrice;
+
+            referrer.balance = (referrer.balance || 0) + Number(commissionBTC.toFixed(8));
+            saveJson('users', users);
+
             try {
                 const form = new FormData();
-                form.append('chat_id', userId);
-                form.append('photo', fs.createReadStream(path.join(process.env.DATA_PATH, 'public/images/bit-check-image.png')));
-                form.append('caption', caption);
-                form.append('reply_markup', JSON.stringify({
-                    inline_keyboard: [
-                        [{ text: '📞 Написать оператору', url: contactUrl }],
-                    ]
-                }));
-
+                form.append('chat_id', referrer.id);
+                form.append('photo', fs.createReadStream(path.join(process.env.DATA_PATH, 'images/bit-check-image.png')));
+                form.append('caption', `🎉 Реферальный бонус! +${commissionBTC.toFixed(8)} BTC (~${earningsRub.toFixed(2)}) за сделку ID ${deal.id}`);
                 await axios.post(`${TELEGRAM_API}/sendPhoto`, form, {
                     headers: form.getHeaders(),
                     timeout: 5000
                 });
-
-                const users = loadJson('users');
-                const referrer = users.find(u => u.referrals && u.referrals.includes(deal.userId));
-                if (referrer) {
-                    const referralCommissionRate = config.referralCommissionRate || 0.15;
-                    const btcPrice = await (async () => {
-                        try {
-                            const response = await axios.get('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=rub', { timeout: 5000 });
-                            return response.data.bitcoin.rub || 5000000;
-                        } catch (error) {
-                            console.error('Error fetching BTC price:', error.message);
-                            return 5000000;
-                        }
-                    })();
-                    const commissionBTC = (deal.commission / btcPrice) * referralCommissionRate;
-                    const earningsRub = commissionBTC * btcPrice;
-
-                    referrer.balance = (referrer.balance || 0) + Number(commissionBTC.toFixed(8));
-                    saveJson('users', users);
-
-                    try {
-                        const form = new FormData();
-                        form.append('chat_id', referrer.id);
-                        form.append('photo', fs.createReadStream(path.join(process.env.DATA_PATH, 'public/images/bit-check-image.png')));
-                        form.append('caption', `🎉 Реферальный бонус! +${commissionBTC.toFixed(8)} BTC (~${earningsRub.toFixed(2)}) за сделку ID ${deal.id}`);
-                        await axios.post(`${TELEGRAM_API}/sendPhoto`, form, {
-                            headers: form.getHeaders(),
-                            timeout: 5000
-                        });
-                    } catch (error) {
-                        console.error(`Error sending notification to referrer ${referrer.id}:`, error.message);
-                    }
-                }
             } catch (error) {
-                console.error(`Error sending notification to user ${userId}:`, error.message);
+                console.error(`Error sending notification to referrer ${referrer.id}:`, error.message);
             }
-        })();
+        }
 
         return res.json(deals[idx]);
     } catch (error) {
-        console.error('Error processing PATCH /api/deals/:id/complete:', error.message);
+        console.error('Error completing deal:', error.message);
         res.status(500).json({ error: 'Internal Server Error' });
     }
 });
@@ -445,7 +441,7 @@ app.delete('/api/broadcasts/:id', authenticateToken, restrictTo('mainAdmin'), (r
         let list = loadJson('broadcasts');
         const broadcast = list.find(x => x.id === req.params.id);
         if (broadcast && broadcast.imageName) {
-            const imagePath = path.join(process.env.DATA_PATH, 'public/images/broadcasts-images', broadcast.imageName);
+            const imagePath = path.join(process.env.DATA_PATH, 'images/broadcasts-images', broadcast.imageName);
             fs.removeSync(imagePath);
         }
         list = list.filter(x => x.id !== req.params.id);
@@ -489,6 +485,7 @@ app.post('/api/withdrawals', authenticateToken, restrictTo('mainAdmin'), (req, r
     }
 });
 
+
 app.patch('/api/withdrawals/:id/complete', authenticateToken, restrictTo('mainAdmin'), async (req, res) => {
     try {
         let withdrawals = loadJson('withdrawals');
@@ -505,13 +502,16 @@ app.patch('/api/withdrawals/:id/complete', authenticateToken, restrictTo('mainAd
         const caption = `✅ Вывод рефералов завершен! №${withdrawal.id}\nКоличество: ${withdrawal.cryptoAmount} BTC (~${withdrawal.rubAmount} RUB)\nКошелёк: ${withdrawal.walletAddress}`;
 
         const config = loadJson('config');
-        const randomOperator = config.operatorUsernames[Math.floor(Math.random() * config.operatorUsernames.length)];
-        const contactUrl = randomOperator?.startsWith('@') ? `https://t.me/${randomOperator.substring(1)}` : 'https://t.me/OperatorName';
-
+        const users = loadJson('users');
+        
         try {
+            const operators = config.multipleOperatorsData.filter(op => op.currency === 'BTC');
+            const operator = operators[0] || config.multipleOperatorsData[0];
+            const contactUrl = operator?.username ? `https://t.me/${operator.username}` : 'https://t.me/OperatorName';
+
             const form = new FormData();
             form.append('chat_id', userId);
-            form.append('photo', fs.createReadStream(path.join(process.env.DATA_PATH, 'public/images/bit-check-image.png')));
+            form.append('photo', fs.createReadStream(path.join(process.env.DATA_PATH, 'images/bit-check-image.png')));
             form.append('caption', caption);
             form.append('reply_markup', JSON.stringify({
                 inline_keyboard: [
@@ -528,7 +528,7 @@ app.patch('/api/withdrawals/:id/complete', authenticateToken, restrictTo('mainAd
 
         res.json(withdrawals[idx]);
     } catch (error) {
-        console.error('Error processing PATCH /api/withdrawals/:id/complete:', error.message);
+        console.error('Error completing withdraw:', error.message);
         res.status(500).json({ error: 'Internal Server Error' });
     }
 });
