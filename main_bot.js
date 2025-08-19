@@ -761,7 +761,7 @@ main_bot.on('message', async ctx => {
             }
 
             if (currency === 'BTC') {
-                mied = inputValue < 1;
+                isCryptoInput = inputValue < 1;
             } else if (currency === 'LTC') {
                 isCryptoInput = inputValue < 100;
             }

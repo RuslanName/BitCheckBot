@@ -11,17 +11,9 @@ function loadJson(name) {
         }
         return fs.readJsonSync(filePath);
     } catch (err) {
-        console.error(`Error loading ${name}.json:`, err.message);
         return [];
     }
 }
-
-const logStream = fs.createWriteStream(path.join(__dirname, 'spam_bot.log'), { flags: 'a' });
-const log = (...args) => {
-    const message = `${new Date().toISOString()} - ${args.join(' ')}`;
-    logStream.write(`${message}\n`);
-    console.log(message);
-};
 
 const bot = new Telegraf(process.env.SPAM_BOT_TOKEN, {
     telegram: { webhookReply: false },
@@ -29,7 +21,6 @@ const bot = new Telegraf(process.env.SPAM_BOT_TOKEN, {
 
 const imagePath = path.join(__dirname, 'data/images/bit-check-image.png');
 if (!fs.existsSync(imagePath)) {
-    log(`Error: Image file not found at ${imagePath}`);
     process.exit(1);
 }
 
@@ -38,7 +29,6 @@ async function isAdmin(ctx) {
         const member = await ctx.telegram.getChatMember(ctx.chat.id, ctx.from.id);
         return member.status === 'administrator' || member.status === 'creator';
     } catch (error) {
-        log(`Error checking admin status for userId=${ctx.from.id}: ${error.message}`);
         return false;
     }
 }
@@ -51,18 +41,12 @@ bot.on('message', async (ctx) => {
         const messageId = ctx.message.message_id;
 
         if (ctx.message.new_chat_members) {
-            await ctx.telegram.deleteMessage(chatId, messageId).catch((err) => {
-                log(`Error deleting join message: chatId=${chatId}, messageId=${messageId}, error=${err.message}`);
-            });
-            log(`Deleted join message: chatId=${chatId}, messageId=${messageId}`);
+            await ctx.telegram.deleteMessage(chatId, messageId).catch(() => {});
             return;
         }
 
         if (ctx.message.left_chat_member) {
-            await ctx.telegram.deleteMessage(chatId, messageId).catch((err) => {
-                log(`Error deleting leave message: chatId=${chatId}, messageId=${messageId}, error=${err.message}`);
-            });
-            log(`Deleted leave message: chatId=${chatId}, messageId=${messageId}`);
+            await ctx.telegram.deleteMessage(chatId, messageId).catch(() => {});
             return;
         }
 
@@ -73,7 +57,6 @@ bot.on('message', async (ctx) => {
                 try {
                     const config = loadJson('config');
                     if (!config) {
-                        log(`Error: Failed to load config for chatId=${chatId}, userId=${ctx.from.id}`);
                         return;
                     }
 
@@ -102,35 +85,23 @@ bot.on('message', async (ctx) => {
                         }
                     );
                     const sentMessageId = sentMessage.message_id;
-                    log(`Sent message with operator buttons: chatId=${chatId}, messageId=${sentMessageId}, userId=${ctx.from.id}`);
 
                     setTimeout(async () => {
                         try {
                             await ctx.telegram.deleteMessage(chatId, sentMessageId);
-                            log(`Deleted button message: chatId=${chatId}, messageId=${sentMessageId}`);
-                        } catch (error) {
-                            log(`Error deleting button message: chatId=${chatId}, messageId=${sentMessageId}, error=${error.message}`);
-                        }
+                        } catch (error) {}
                     }, 30 * 1000);
-                } catch (error) {
-                    log(`Error sending image with operator buttons: chatId=${chatId}, userId=${ctx.from.id}, error=${error.message}`);
-                }
+                } catch (error) {}
             }
 
             const linkRegex = /(?:t\.me\/|telegram\.me\/|tg:\/\/)[^\s]+/i;
             if (linkRegex.test(messageText)) {
                 const allowedLink = 't.me/BitCheck_bot';
                 if (messageText.includes(allowedLink)) {
-                    log(`Allowed link ${allowedLink}: userId=${ctx.from.id}`);
                 } else {
                     const isUserAdmin = await isAdmin(ctx);
                     if (!isUserAdmin) {
-                        await ctx.telegram.deleteMessage(chatId, messageId).catch((err) => {
-                            log(`Error deleting message with link: chatId=${chatId}, messageId=${messageId}, error=${err.message}`);
-                        });
-                        log(`Deleted message with link: chatId=${chatId}, messageId=${messageId}, userId=${ctx.from.id}`);
-                    } else {
-                        log(`Link allowed from admin: userId=${ctx.from.id}`);
+                        await ctx.telegram.deleteMessage(chatId, messageId).catch(() => {});
                     }
                 }
             }
@@ -144,46 +115,27 @@ bot.on('message', async (ctx) => {
                 if (hasDisallowedUsername) {
                     const isUserAdmin = await isAdmin(ctx);
                     if (!isUserAdmin) {
-                        await ctx.telegram.deleteMessage(chatId, messageId).catch((err) => {
-                            log(`Error deleting message with username: chatId=${chatId}, messageId=${messageId}, error=${err.message}`);
-                        });
-                        log(`Deleted message with disallowed username: chatId=${chatId}, messageId=${messageId}, userId=${ctx.from.id}, usernames=${usernames.join(',')}`);
-                    } else {
-                        log(`Username allowed from admin: userId=${ctx.from.id}, usernames=${usernames.join(',')}`);
+                        await ctx.telegram.deleteMessage(chatId, messageId).catch(() => {});
                     }
-                } else {
-                    log(`Allowed usernames: userId=${ctx.from.id}, usernames=${usernames.join(',')}`);
                 }
             }
         }
-    } catch (error) {
-        log(`Error processing message: chatId=${ctx.chat.id}, userId=${ctx.from.id}, error=${error.message}`);
-    }
+    } catch (error) {}
 });
 
-bot.catch((err, ctx) => {
-    log(`Global error for ${ctx.updateType}: ${err.message}`);
-});
+bot.catch((err, ctx) => {});
 
 bot.launch({
     dropPendingUpdates: true,
-}).then(() => {
-    log('Bot started successfully');
-}).catch((err) => {
-    log(`Failed to start bot: ${err.message}`);
+}).then(() => {}).catch((err) => {
     setTimeout(() => {
-        log('Attempting to reconnect...');
-        bot.launch().then(() => log('Bot reconnected successfully'));
+        bot.launch();
     }, 5000);
 });
 
 process.once('SIGINT', () => {
-    log('Bot stopped (SIGINT)');
     bot.stop('SIGINT');
-    logStream.end();
 });
 process.once('SIGTERM', () => {
-    log('Bot stopped (SIGTERM)');
     bot.stop('SIGTERM');
-    logStream.end();
 });
