@@ -15,7 +15,7 @@ function loadJson(name) {
     }
 }
 
-const bot = new Telegraf(process.env.SPAM_BOT_TOKEN, {
+const spam_bot = new Telegraf(process.env.SPAM_BOT_TOKEN, {
     telegram: { webhookReply: false },
 });
 
@@ -33,7 +33,7 @@ async function isAdmin(ctx) {
     }
 }
 
-bot.on('message', async (ctx) => {
+spam_bot.on('message', async (ctx) => {
     if (ctx.chat.type !== 'group' && ctx.chat.type !== 'supergroup') return;
 
     try {
@@ -120,22 +120,20 @@ bot.on('message', async (ctx) => {
                 }
             }
         }
-    } catch (error) {}
+    } catch (error) {
+        console.log(error);
+    }
 });
 
-bot.catch((err, ctx) => {});
-
-bot.launch({
-    dropPendingUpdates: true,
-}).then(() => {}).catch((err) => {
-    setTimeout(() => {
-        bot.launch();
-    }, 5000);
+spam_bot.launch().then(() => {
+    console.log('Bot started');
+}).catch(err => {
+    console.error('Error launching bot:', err.message);
 });
 
 process.once('SIGINT', () => {
-    bot.stop('SIGINT');
+    spam_bot.stop('SIGINT');
 });
 process.once('SIGTERM', () => {
-    bot.stop('SIGTERM');
+    spam_bot.stop('SIGTERM');
 });

@@ -13,12 +13,11 @@
         <a href="/">Настройки</a>
         <a href="/users">Пользователи</a>
         <a href="/deals">Сделки</a>
-        <a href="/referrals">Вывод рефералов</a>
+        <a href="/withdrawals">Вывод рефералов</a>
         <a href="/broadcasts">Рассылка</a>
         <a href="/analytics">Аналитика</a>
     </nav>
     <main>
-        <h1>Рассылка</h1>
         <section class="form-container">
             <h2>Создать рассылку</h2>
             <form id="form">
@@ -45,7 +44,6 @@
             </form>
         </section>
         <section>
-            <h2>Список рассылок</h2>
             <div class="controls">
                 <input type="text" id="searchId" placeholder="Поиск по ID или тексту">
                 <select id="perPage">
@@ -76,6 +74,6 @@
     </main>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
-<script src="/js/scripts.js"></script>
+<script type="module" src="/js/index.js"></script>
 </body>
 </html>

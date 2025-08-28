@@ -343,6 +343,24 @@ async function calculateCommission(amount, currency, type) {
     return (amount * commissionPercent) / 100;
 }
 
+function getContactUrl(currency) {
+    const config = loadJson('config');
+    if (config.multipleOperatorsMode && config.multipleOperatorsData.length > 0) {
+        const operator = config.multipleOperatorsData.find(op => op.currency === currency) || config.multipleOperatorsData[0];
+        return `https://t.me/${operator.username}`;
+    }
+    return `https://t.me/${config.singleOperatorUsername}`;
+}
+
+function getOperators(currency) {
+    const config = loadJson('config');
+    if (config.multipleOperatorsMode && config.multipleOperatorsData.length > 0) {
+        return config.multipleOperatorsData.filter(op => op.currency === currency);
+    } else {
+        return [{ username: config.singleOperatorUsername, currency }];
+    }
+}
+
 function calculateUserStats(userId) {
     const deals = loadJson('deals');
     const userDeals = deals.filter(d => d.userId === userId && d.status === 'completed');
@@ -554,7 +572,8 @@ main_bot.hears('🤝 Партнёрство', async ctx => {
     const users = loadJson('users');
     const states = loadStates();
     const userId = ctx.from.id;
-    const user = users.find(u => u.id === userId);const referralLink = `https://t.me/${ctx.botInfo.username}?start=ref_${user.referralId}`;
+    const user = users.find(u => u.id === userId);
+    const referralLink = `https://t.me/${ctx.botInfo.username}?start=ref_${user.referralId}`;
     const priceBTC = await getBtcRubPrice();
     const earningsRub = user.balance * priceBTC;
     const text = `🤝 Реферальная программа\n🔗 ${referralLink}\n👥 Приглашено: ${(user.referrals || []).length}\n💰 Заработано: ${(user.balance || 0).toFixed(8)} BTC (~${earningsRub.toFixed(2)} RUB)\n${Date.now() - lastPriceUpdate > CACHE_DURATION ? '⚠️ Курс может быть устаревшим' : ''}`;
@@ -964,8 +983,8 @@ main_bot.on('message', async ctx => {
                 console.error(`Error deleting message ${states.pendingMessageIds[id]}:`, error.message);
             }
 
-            const operator = config.multipleOperatorsData.find(op => op.currency === 'BTC') || config.multipleOperatorsData[0];
-            const contactUrl = operator?.username ? `https://t.me/${operator.username}` : 'https://t.me/OperatorName';
+            const contactUrl = getContactUrl('BTC');
+
             const message = await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
                 caption: `✅ Заявка на вывод рефералов создана! № ${withdrawal.id}\nКоличество: ${withdrawal.cryptoAmount.toFixed(8)} BTC (~${withdrawal.rubAmount.toFixed(2)} RUB)\nКошелёк: ${withdrawal.walletAddress}\n\nСамостоятельно свяжитесь с оператором для получения реквизитов! ⬇️`,
                 reply_markup: {
@@ -980,7 +999,7 @@ main_bot.on('message', async ctx => {
 
             user.balance = Number((user.balance - withdrawal.cryptoAmount).toFixed(8));
 
-            const operators = config.multipleOperatorsData.filter(op => op.currency === 'BTC');
+            const operators = getOperators('BTC')
             for (const operator of operators) {
                 try {
                     const operatorId = users.find(u => u.username === operator.username)?.id;
@@ -989,6 +1008,7 @@ main_bot.on('message', async ctx => {
                             caption: `🆕 Новая заявка на вывод рефералов № ${withdrawal.id}\n@${user.username || 'Нет'} (ID ${user.id})\nКоличество: ${withdrawal.cryptoAmount.toFixed(8)} BTC\nСумма: ${withdrawal.rubAmount.toFixed(2)} RUB\nКошелёк: ${withdrawal.walletAddress}`,
                             reply_markup: {
                                 inline_keyboard: [
+                                    [{ text: '✅ Завершить', callback_data: `operator_complete_withdrawal_${withdrawal.id}` }],
                                     [{ text: '📞 Написать пользователю', url: user.username ? `https://t.me/${user.username}` : `https://t.me/id${user.id}` }]
                                 ]
                             }
@@ -1076,7 +1096,7 @@ main_bot.on('message', async ctx => {
             const priceBTC = await getBtcRubPrice();
             const rubAmount = amount * priceBTC;
 
-            if (user.balance === undefined) {
+            if (!user.balance) {
                 user.balance = 0;
             }
 
@@ -1124,19 +1144,19 @@ main_bot.on('callback_query', async ctx => {
 
     try {
         if (!data) {
-            await ctx.answerCbQuery('Ошибка: данные не получены', { show_alert: false });
+            await ctx.answerCbQuery('❌ Данные не получены', { show_alert: true });
             return;
         }
 
         const config = loadJson('config');
         const users = loadJson('users');
         const deals = loadJson('deals');
-        const withdrawals = loadJson('withdrawals');
         const states = loadStates();
 
         if (data === 'refresh_profile') {
             const userId = ctx.from.id;
-            const user = users.find(u => u.id === userId);const priceBTC = await getBtcRubPrice();
+            const user = users.find(u => u.id === userId);
+            const priceBTC = await getBtcRubPrice();
             const stats = calculateUserStats(userId);
             const earningsRub = user.balance * priceBTC;
             const username = user.username ? `@${user.username}` : 'Нет';
@@ -1157,7 +1177,7 @@ main_bot.on('callback_query', async ctx => {
                         ]
                     }
                 });
-                await ctx.answerCbQuery('Профиль обновлен', { show_alert: false });
+                await ctx.answerCbQuery('✅ Профиль обновлен', { show_alert: false });
             } catch (error) {
                 console.error('Error updating profile:', error.message);
                 await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, { caption: profileText, reply_markup: {
@@ -1165,7 +1185,7 @@ main_bot.on('callback_query', async ctx => {
                             [{ text: '🔄 Обновить', callback_data: 'refresh_profile' }]
                         ]
                     }});
-                await ctx.answerCbQuery('Профиль обновлен (новое сообщение)', { show_alert: false });
+                await ctx.answerCbQuery('✅ Профиль обновлен (новое сообщение)', { show_alert: false });
             }
             return;
         }
@@ -1189,17 +1209,11 @@ main_bot.on('callback_query', async ctx => {
 
             delete states.pendingMessageIds[userId];
 
-            const message = await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
-                caption: '❌ Действие отменено'
-            });
-
-            states.pendingMessageIds[userId] = message.message_id;
-
             clearPendingStates(states, userId);
 
             saveJson('states', states);
 
-            await ctx.answerCbQuery('Действие отменено', { show_alert: false });
+            await ctx.answerCbQuery('❌ Действие отменено', { show_alert: false });
             return;
         }
 
@@ -1214,8 +1228,7 @@ main_bot.on('callback_query', async ctx => {
             }
 
             if (!captchaData) {
-                await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, { caption: '❌ Капча истекла. Используйте /start' });
-                await ctx.answerCbQuery('Капча истекла', { show_alert: false });
+                await ctx.answerCbQuery('❌ Капча истекла. Используйте /start', { show_alert: false });
                 return;
             }
 
@@ -1305,7 +1318,6 @@ main_bot.on('callback_query', async ctx => {
                 }
             });
             states.pendingMessageIds[from] = message.message_id;
-            await ctx.answerCbQuery('Напишите сообщение в поддержку', { show_alert: false });
             saveJson('states', states);
             return;
         }
@@ -1324,7 +1336,6 @@ main_bot.on('callback_query', async ctx => {
             }
             states.pendingSupport[from] = { targetId };
             await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, { caption: `✉️ Введите ответ для ID ${targetId}:` });
-            await ctx.answerCbQuery('Введите ответ', { show_alert: false });
             saveJson('states', states);
             return;
         }
@@ -1342,8 +1353,7 @@ main_bot.on('callback_query', async ctx => {
                 }
                 delete states.pendingOperatorMessages[targetId];
             }
-            await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, { caption: '✅ Обращение закрыто' });
-            await ctx.answerCbQuery('Обращение закрыто', { show_alert: false });
+            await ctx.answerCbQuery('✅ Обращение закрыто', { show_alert: false });
             saveJson('states', states);
             return;
         }
@@ -1351,8 +1361,7 @@ main_bot.on('callback_query', async ctx => {
         if (data === 'withdraw_referral') {
             const user = users.find(u => u.id === from);
             if (!user || !user.balance) {
-                await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, { caption: '❌ Нет средств' });
-                await ctx.answerCbQuery('Нет средств для вывода', { show_alert: false });
+                await ctx.answerCbQuery('❌ Нет средств для вывода', { show_alert: false });
                 saveJson('states', states);
                 return;
             }
@@ -1377,7 +1386,6 @@ main_bot.on('callback_query', async ctx => {
                 }
             });
             states.pendingMessageIds[from] = message.message_id;
-            await ctx.answerCbQuery('Введите количество BTC', { show_alert: false });
             saveJson('states', states);
             return;
         }
@@ -1402,7 +1410,6 @@ main_bot.on('callback_query', async ctx => {
                 }
             });
             states.pendingMessageIds[from] = message.message_id;
-            await ctx.answerCbQuery(`Выбрано: ${currency}`, { show_alert: false });
             saveJson('states', states);
             return;
         }
@@ -1427,7 +1434,6 @@ main_bot.on('callback_query', async ctx => {
                 }
             });
             states.pendingMessageIds[from] = message.message_id;
-            await ctx.answerCbQuery(`Выбрано: ${currency}`, { show_alert: false });
             saveJson('states', states);
             return;
         }
@@ -1436,8 +1442,7 @@ main_bot.on('callback_query', async ctx => {
             const dealId = data.split('_')[1];
             const dealIndex = deals.findIndex(d => d.id === dealId && d.status === 'draft');
             if (dealIndex === -1) {
-                await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, { caption: '❌ Заявка не найдена или уже обработана' });
-                await ctx.answerCbQuery('Заявка не найдена', { show_alert: false });
+                await ctx.answerCbQuery('❌ Заявка не найдена или уже обработана', { show_alert: true });
                 return;
             }
 
@@ -1452,8 +1457,7 @@ main_bot.on('callback_query', async ctx => {
             const user = users.find(u => u.id === deal.userId);
             const actionText = deal.type === 'buy' ? 'Покупка' : 'Продажа';
             const paymentTarget = deal.type === 'buy' ? 'Кошелёк' : 'Реквизиты';
-            const operator = config.multipleOperatorsData.find(op => op.currency === deal.currency) || config.multipleOperatorsData[0];
-            const contactUrl = operator?.username ? `https://t.me/${operator.username}` : 'https://t.me/OperatorName';
+            const contactUrl = getContactUrl(deal.currency);
 
             try {
                 await ctx.deleteMessage(states.pendingMessageIds[deal.userId]);
@@ -1471,7 +1475,7 @@ main_bot.on('callback_query', async ctx => {
             });
             states.pendingMessageIds[deal.userId] = message.message_id;
 
-            const operators = config.multipleOperatorsData.filter(op => op.currency === deal.currency);
+            const operators = getOperators(deal.currency);
             for (const operator of operators) {
                 try {
                     const operatorId = users.find(u => u.username === operator.username)?.id;
@@ -1480,6 +1484,10 @@ main_bot.on('callback_query', async ctx => {
                             caption: `🆕 Новая заявка на сделку № ${deal.id}\n${actionText} ${deal.currency}\n@${user.username || 'Нет'} (ID ${deal.userId})\nКоличество: ${deal.cryptoAmount}\nСумма: ${deal.rubAmount} RUB\nКомиссия: ${deal.commission.toFixed(2)} RUB (скидка ${discount}%)\nИтог: ${deal.total.toFixed(2)} RUB\n${paymentTarget}: ${deal.walletAddress}`,
                             reply_markup: {
                                 inline_keyboard: [
+                                    [
+                                        { text: '🗑️ Удалить', callback_data: `operator_delete_deal_${deal.id}` },
+                                        { text: '✅ Завершить', callback_data: `operator_complete_deal_${deal.id}` }
+                                    ],
                                     [{ text: '📞 Написать пользователю', url: user.username ? `https://t.me/${user.username}` : `https://t.me/id${deal.userId}` }]
                                 ]
                             }
@@ -1490,143 +1498,187 @@ main_bot.on('callback_query', async ctx => {
                 }
             }
 
-            await ctx.answerCbQuery('Заявка создана', { show_alert: false });
+            await ctx.answerCbQuery('✅ Заявка создана', { show_alert: false });
             saveJson('deals', deals);
             saveJson('states', states);
-            return;
-        }
-
-        if (data.startsWith('cancel_withdrawal_')) {
-            const withdrawalId = data.split('_')[2];
-            const withdrawalIndex = withdrawals.findIndex(w => w.id === withdrawalId && (w.status === 'pending' || w.status === 'draft'));
-            if (withdrawalIndex === -1) {
-                try {
-                    await ctx.deleteMessage(states.pendingMessageIds[from]);
-                } catch (error) {
-                    console.error(`Error deleting message ${states.pendingMessageIds[from]}:`, error.message);
-                }
-                const message = await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
-                    caption: `❌ Заявка на вывод № ${withdrawalId} не найдена`
-                });
-                states.pendingMessageIds[from] = message.message_id;
-                await ctx.answerCbQuery('Заявка не найдена', { show_alert: false });
-                return;
-            }
-
-            const withdrawal = withdrawals[withdrawalIndex];
-            const user = users.find(u => u.id === withdrawal.userId);
-            user.balance = Number((user.balance + withdrawal.cryptoAmount).toFixed(8));
-
-            withdrawals.splice(withdrawalIndex, 1);
-
-            try {
-                await ctx.deleteMessage(states.pendingMessageIds[from]);
-            } catch (error) {
-                console.error(`Error deleting message ${states.pendingMessageIds[from]}:`, error.message);
-            }
-            const message = await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
-                caption: `❌ Заявка на вывод № ${withdrawal.id} отменена`
-            });
-            states.pendingMessageIds[from] = message.message_id;
-            await ctx.answerCbQuery('Заявка отменена', { show_alert: false });
-            saveJson('users', users);
-            saveJson('withdrawals', withdrawals);
-            saveJson('states', states);
-            return;
-        }
-
-        if (data.startsWith('complete_withdrawal_')) {
-            const withdrawalId = data.split('_')[2];
-            const withdrawalIndex = withdrawals.findIndex(w => w.id === withdrawalId);
-            if (withdrawalIndex === -1) {
-                await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, { caption: '❌ Заявка не найдена' });
-                await ctx.answerCbQuery('Заявка не найдена', { show_alert: false });
-                return;
-            }
-
-            withdrawals[withdrawalIndex].status = 'completed';
-
-            const withdrawal = withdrawals[withdrawalIndex];
-            const user = users.find(u => u.id === withdrawal.userId);
-            const userDisplay = user?.username ? `@${user.username}` : `ID ${withdrawal.userId}`;
-
-            const operators = config.multipleOperatorsData.filter(op => op.currency === 'BTC');
-            for (const operator of operators) {
-                try {
-                    const operatorId = users.find(u => u.username === operator.username)?.id;
-                    if (operatorId && await isValidChat(operatorId)) {
-                        await main_bot.telegram.sendPhoto(operatorId, { source: BIT_CHECK_IMAGE_PATH }, {
-                            caption: `✅ Вывод рефералов № ${withdrawal.id} завершен:\n${userDisplay}\nКоличество: ${withdrawal.cryptoAmount} BTC\nСумма: ${withdrawal.rubAmount} RUB`
-                        });
-                    }
-                } catch (error) {
-                    console.error(`Error sending to operator ${operator.username}:`, error.message);
-                }
-            }
-
-            await ctx.answerCbQuery('Заявка завершена', { show_alert: false });
-            saveJson('withdrawals', withdrawals);
             return;
         }
 
         if (data.startsWith('cancel_deal_')) {
             const dealId = data.split('_')[2];
             const dealIndex = deals.findIndex(d => d.id === dealId && (d.status === 'draft' || d.status === 'pending'));
-            if (dealIndex === -1) {
-                try {
-                    await ctx.deleteMessage(states.pendingMessageIds[from]);
-                } catch (error) {
-                    console.error(`Ошибка удаления сообщения ${states.pendingMessageIds[from]}:`, error.message);
-                }
-                const message = await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
-                    caption: `❌ Заявка № ${dealId} не найдена`
-                });
-                states.pendingMessageIds[from] = message.message_id;
-                await ctx.answerCbQuery('Заявка не найдена', { show_alert: false });
-                return;
+
+            if (dealIndex !== -1) {
+                deals.splice(dealIndex, 1);
+                saveJson('deals', deals);
             }
-
-            const deal = deals[dealIndex];
-            deals.splice(dealIndex, 1);
-
-            const user = users.find(u => u.id === deal.userId);
-            const actionText = deal.type === 'buy' ? 'Покупка' : 'Продажа';
 
             try {
                 await ctx.deleteMessage(states.pendingMessageIds[from]);
             } catch (error) {
-                console.error(`Ошибка удаления сообщения ${states.pendingMessageIds[from]}:`, error.message);
+                console.error(`Error deleting message ${states.pendingMessageIds[from]}:`, error.message);
             }
+
             const message = await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
-                caption: `❌ Заявка № ${deal.id} отменена`
+                caption: `❌ Заявка № ${dealId} удалена`
             });
             states.pendingMessageIds[from] = message.message_id;
+            saveJson('states', states);
+        }
 
-            if (deal.status === 'pending') {
-                const operators = config.multipleOperatorsData.filter(op => op.currency === deal.currency);
-                for (const operator of operators) {
-                    try {
-                        const operatorId = users.find(u => u.username === operator.username)?.id;
-                        if (operatorId && await isValidChat(operatorId)) {
-                            await main_bot.telegram.sendPhoto(operatorId, { source: BIT_CHECK_IMAGE_PATH }, {
-                                caption: `❌ Заявка на сделку № ${deal.id} отменена\n${actionText} ${deal.currency}\n@${user.username || 'Нет'} (ID ${deal.userId})`
-                            });
+        if (data.startsWith('operator_delete_deal_')) {
+            const dealId = data.split('_')[3];
+            try {
+                let deals = loadJson('deals');
+                const dealIndex = deals.findIndex(d => d.id === dealId);
+
+                if (dealIndex === -1) {
+                    await ctx.answerCbQuery('❌ Сделка не найдена или уже обработана', { show_alert: true });
+                    return;
+                }
+
+                const deal = deals[dealIndex];
+                deals = deals.filter(d => d.id !== dealId);
+                saveJson('deals', deals);
+
+                try {
+                    await ctx.editMessageCaption(`❌ Сделка № ${deal.id} удалена`, {
+                        reply_markup: { inline_keyboard: [] }
+                    });
+                } catch (error) {
+                    await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
+                        caption: `✅ Сделка № ${deal.id} успешно удалена`
+                    });
+                }
+
+                await ctx.answerCbQuery('✅ Сделка удалена', { show_alert: false });
+            } catch (error) {
+                console.error('Error deleting deal:', error.message);
+                await ctx.answerCbQuery('❌ Ошибка при удалении сделки', { show_alert: true });
+            }
+            return;
+        }
+
+        if (data.startsWith('operator_complete_deal_')) {
+            const dealId = data.split('_')[3];
+            try {
+                let deals = loadJson('deals');
+                const dealIndex = deals.findIndex(d => d.id === dealId);
+
+                if (dealIndex === -1) {
+                    await ctx.answerCbQuery('❌ Сделка не найдена или уже обработана', { show_alert: true });
+                    return;
+                }
+
+                const deal = deals[dealIndex];
+                deals[dealIndex] = { ...deal, status: 'completed' };
+                saveJson('deals', deals);
+
+                const userId = deal.userId;
+                const actionText = deal.type === 'buy' ? 'Покупка' : 'Продажа';
+                const caption = `✅ Сделка завершена! №${deal.id}\n${actionText} ${deal.currency}\nКоличество: ${deal.cryptoAmount} ${deal.currency}\nСумма: ${deal.rubAmount} RUB\nКомиссия: ${deal.commission.toFixed(2)} RUB\nИтог: ${deal.total.toFixed(2)} RUB\nКошелёк: ${deal.walletAddress}`;
+
+                const contactUrl = getContactUrl(deal.currency);
+
+                try {
+                    await main_bot.telegram.sendPhoto(userId, { source: BIT_CHECK_IMAGE_PATH }, {
+                        caption: caption,
+                        reply_markup: {
+                            inline_keyboard: [
+                                [{ text: '📞 Написать оператору', url: contactUrl }]
+                            ]
                         }
+                    });
+                } catch (error) {
+                    console.error(`Error sending completion notification to user ${userId}:`, error.message);
+                }
+
+                const referrer = users.find(u => u.referrals && u.referrals.includes(deal.userId));
+                if (referrer) {
+                    const referralRevenuePercent = config.referralRevenuePercent / 100;
+                    const btcPrice = getBtcRubPrice();
+                    const commissionBTC = (deal.commission / btcPrice) * referralRevenuePercent;
+                    const earningsRub = commissionBTC * btcPrice;
+
+                    referrer.balance = (referrer.balance || 0) + Number(commissionBTC.toFixed(8));
+                    saveJson('users', users);
+
+                    try {
+                        await main_bot.telegram.sendPhoto(referrer.id, { source: BIT_CHECK_IMAGE_PATH }, {
+                            caption: `🎉 Реферальный бонус! +${commissionBTC.toFixed(8)} BTC (~${earningsRub.toFixed(2)}) за сделку ID ${deal.id}`
+                        });
                     } catch (error) {
-                        console.error(`Error sending to operator ${operator.username}:`, error.message);
+                        console.error(`Error sending notification to referrer ${referrer.id}:`, error.message);
                     }
                 }
+
+                try {
+                    await ctx.editMessageCaption(`✅ Сделка № ${deal.id} завершена`, {
+                        reply_markup: { inline_keyboard: [] }
+                    });
+                } catch (error) {
+                    await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
+                        caption: `✅ Сделка № ${deal.id} успешно завершена`
+                    });
+                }
+            } catch (error) {
+                console.error('Error completing deal:', error.message);
+                await ctx.answerCbQuery('❌ Ошибка при завершении сделки', { show_alert: true });
             }
+            return;
+        }
 
-            await ctx.answerCbQuery('Заявка отменена', { show_alert: false });
+        if (data.startsWith('operator_complete_withdrawal_')) {
+            const withdrawalId = data.split('_')[3];
+            try {
+                let withdrawals = loadJson('withdrawals');
+                const withdrawalIndex = withdrawals.findIndex(w => w.id === withdrawalId);
 
-            saveJson('deals', deals);
-            saveJson('states', states);
+                if (withdrawalIndex === -1) {
+                    await ctx.answerCbQuery('❌ Заявка на вывод не найдена или уже обработана', { show_alert: true });
+                    return;
+                }
+
+                const withdrawal = withdrawals[withdrawalIndex];
+                withdrawals[withdrawalIndex] = { ...withdrawal, status: 'completed' };
+                saveJson('withdrawals', withdrawals);
+
+                const userId = withdrawal.userId;
+                const contactUrl = getContactUrl('BTC');
+
+                try {
+                    await main_bot.telegram.sendPhoto(userId, { source: BIT_CHECK_IMAGE_PATH }, {
+                        caption: `✅ Вывод рефералов завершен! № ${withdrawal.id}\nКоличество: ${withdrawal.cryptoAmount.toFixed(8)} BTC\nСумма: ${withdrawal.rubAmount.toFixed(2)} RUB\nКошелёк: ${withdrawal.walletAddress}`,
+                        reply_markup: {
+                            inline_keyboard: [
+                                [{ text: '📞 Написать оператору', url: contactUrl }]
+                            ]
+                        }
+                    });
+                } catch (error) {
+                    console.error(`Error sending withdrawal completion notification to user ${userId}:`, error.message);
+                }
+
+                try {
+                    await ctx.editMessageCaption(`✅ Вывод рефералов № ${withdrawal.id} завершен`, {
+                        reply_markup: { inline_keyboard: [] }
+                    });
+
+
+                } catch (error) {
+                    await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
+                        caption: `✅ Вывод рефералов № ${withdrawal.id} успешно завершен`
+                    });
+                }
+            } catch (error) {
+                console.error('Error completing withdrawal:', error.message);
+                await ctx.answerCbQuery('❌ Ошибка при завершении вывода', { show_alert: true });
+            }
+            return;
         }
     } catch (error) {
         console.error('Error processing callback query:', error.message);
-        await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, { caption: '❌ Ошибка обработки запроса' });
-        await ctx.answerCbQuery('Ошибка обработки', { show_alert: false });
+        await ctx.answerCbQuery('❌ Ошибка обработки', { show_alert: true });
     }
 });
 
@@ -1634,4 +1686,11 @@ main_bot.launch().then(() => {
     console.log('Bot started');
 }).catch(err => {
     console.error('Error launching bot:', err.message);
+});
+
+process.once('SIGINT', () => {
+    main_bot.stop('SIGINT');
+});
+process.once('SIGTERM', () => {
+    main_bot.stop('SIGTERM');
 });

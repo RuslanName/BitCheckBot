@@ -14,6 +14,9 @@ app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/html', express.static(path.join(__dirname, 'public/html')));
 
+const apiRouter = express.Router();
+app.use('/api', apiRouter);
+
 const TELEGRAM_API = `https://api.telegram.org/bot${process.env.MAIN_BOT_TOKEN}`;
 const JWT_SECRET = process.env.JWT_SECRET;
 
@@ -112,7 +115,7 @@ function restrictTo(...roles) {
     };
 }
 
-app.post('/api/login', (req, res) => {
+apiRouter.post('/login', (req, res) => {
     const { login, password } = req.body;
     const config = loadJson('config');
 
@@ -148,7 +151,7 @@ app.post('/api/login', (req, res) => {
     res.status(401).json({ error: 'Неверный логин или пароль' });
 });
 
-app.get('/api/user', authenticateToken, (req, res) => {
+apiRouter.get('/user', authenticateToken, (req, res) => {
     try {
         res.json({
             role: req.user.role,
@@ -160,18 +163,18 @@ app.get('/api/user', authenticateToken, (req, res) => {
     }
 });
 
-app.get('/api/config', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
+apiRouter.get('/config', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
     const config = loadJson('config');
     const { adminLogin, adminPassword, ...restConfig } = config;
     res.json(restConfig);
 });
 
-app.get('/api/config/credentials', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
+apiRouter.get('/config/credentials', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
     const config = loadJson('config');
     res.json({ login: config.adminLogin, password: config.adminPassword });
 });
 
-app.put('/api/config', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
+apiRouter.put('/config', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
     const cfg = loadJson('config');
     const { adminLogin, adminPassword } = cfg;
     const updatedConfig = {
@@ -194,7 +197,7 @@ app.put('/api/config', authenticateToken, restrictTo('mainAdmin'), (req, res) =>
     res.json(updatedConfig);
 });
 
-app.put('/api/config/credentials', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
+apiRouter.put('/config/credentials', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
     const { login, password } = req.body;
     const cfg = loadJson('config');
     if (login && password) {
@@ -207,11 +210,11 @@ app.put('/api/config/credentials', authenticateToken, restrictTo('mainAdmin'), (
     }
 });
 
-app.get('/api/bot/status', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
+apiRouter.get('/bot/status', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
     res.json({ botEnabled: getBotStatus() });
 });
 
-app.post('/api/bot/toggle', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
+apiRouter.post('/bot/toggle', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
     const { enabled } = req.body;
 
     if (typeof enabled !== 'boolean') {
@@ -230,11 +233,11 @@ app.post('/api/bot/toggle', authenticateToken, restrictTo('mainAdmin'), (req, re
     });
 });
 
-app.get('/api/users', (req, res) => {
+apiRouter.get('/users', (req, res) => {
     res.json(loadJson('users'));
 });
 
-app.put('/api/users/:id', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
+apiRouter.put('/users/:id', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
     const users = loadJson('users');
     const idx = users.findIndex(u => u.id === +req.params.id);
     if (idx !== -1) {
@@ -245,7 +248,7 @@ app.put('/api/users/:id', authenticateToken, restrictTo('mainAdmin'), (req, res)
     res.sendStatus(404);
 });
 
-app.delete('/api/users/:id', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
+apiRouter.delete('/users/:id', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
     try {
         let users = loadJson('users');
         const userId = parseInt(req.params.id, 10);
@@ -273,7 +276,7 @@ app.delete('/api/users/:id', authenticateToken, restrictTo('mainAdmin'), (req, r
     }
 });
 
-app.get('/api/deals', authenticateToken, (req, res) => {
+apiRouter.get('/deals', authenticateToken, (req, res) => {
     let data = loadJson('deals');
     if (!Array.isArray(data)) {
         data = Object.values(data);
@@ -284,24 +287,7 @@ app.get('/api/deals', authenticateToken, (req, res) => {
     res.json(data);
 });
 
-app.post('/api/deals', authenticateToken, (req, res) => {
-    const list = loadJson('deals');
-    const item = {
-        ...req.body,
-        id: Date.now().toString(),
-        timestamp: new Date().toISOString(),
-        rubAmount: req.body.rubAmount || req.body.amount,
-        userId: req.body.userId || req.body.chatId
-    };
-    if (req.user.role === 'admin' && item.currency !== req.user.currency) {
-        return res.status(403).json({ error: 'Недопустимая валюта для вашего аккаунта' });
-    }
-    list.push(item);
-    saveJson('deals', list);
-    res.status(201).json(item);
-});
-
-app.patch('/api/deals/:id/complete', authenticateToken, async (req, res) => {
+apiRouter.patch('/deals/:id/complete', authenticateToken, async (req, res) => {
     try {
         let deals = loadJson('deals');
         const idx = deals.findIndex(d => d.id === req.params.id);
@@ -324,9 +310,10 @@ app.patch('/api/deals/:id/complete', authenticateToken, async (req, res) => {
         const users = loadJson('users');
 
         try {
-            const operators = config.multipleOperatorsData.filter(op => op.currency === deal.currency);
-            const operator = operators[0] || config.multipleOperatorsData[0];
-            const contactUrl = operator?.username ? `https://t.me/${operator.username}` : 'https://t.me/OperatorName';
+            const contactUrl =
+                config.multipleOperatorsMode && config.multipleOperatorsData.length > 0
+                    ? `https://t.me/${(config.multipleOperatorsData.find(op => op.currency === 'BTC') || config.multipleOperatorsData[0]).username}`
+                    : `https://t.me/${config.singleOperatorUsername}`;
 
             const form = new FormData();
             form.append('chat_id', userId);
@@ -384,7 +371,7 @@ app.patch('/api/deals/:id/complete', authenticateToken, async (req, res) => {
     }
 });
 
-app.delete('/api/deals/:id', authenticateToken, (req, res) => {
+apiRouter.delete('/deals/:id', authenticateToken, (req, res) => {
     try {
         let deals = loadJson('deals');
         const deal = deals.find(d => d.id === req.params.id);
@@ -403,7 +390,7 @@ app.delete('/api/deals/:id', authenticateToken, (req, res) => {
     }
 });
 
-app.get('/api/broadcasts', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
+apiRouter.get('/broadcasts', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
     try {
         res.json(loadJson('broadcasts'));
     } catch (err) {
@@ -412,7 +399,7 @@ app.get('/api/broadcasts', authenticateToken, restrictTo('mainAdmin'), (req, res
     }
 });
 
-app.post('/api/broadcasts', authenticateToken, restrictTo('mainAdmin'), upload.single('image'), (req, res) => {
+apiRouter.post('/broadcasts', authenticateToken, restrictTo('mainAdmin'), upload.single('image'), (req, res) => {
     try {
         const list = loadJson('broadcasts') || [];
         const item = {
@@ -436,7 +423,7 @@ app.post('/api/broadcasts', authenticateToken, restrictTo('mainAdmin'), upload.s
     }
 });
 
-app.delete('/api/broadcasts/:id', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
+apiRouter.delete('/broadcasts/:id', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
     try {
         let list = loadJson('broadcasts');
         const broadcast = list.find(x => x.id === req.params.id);
@@ -453,7 +440,7 @@ app.delete('/api/broadcasts/:id', authenticateToken, restrictTo('mainAdmin'), (r
     }
 });
 
-app.get('/api/withdrawals', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
+apiRouter.get('/withdrawals', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
     try {
         let data = loadJson('withdrawals');
         if (!Array.isArray(data)) {
@@ -466,27 +453,7 @@ app.get('/api/withdrawals', authenticateToken, restrictTo('mainAdmin'), (req, re
     }
 });
 
-app.post('/api/withdrawals', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
-    try {
-        const list = loadJson('withdrawals');
-        const item = {
-            ...req.body,
-            id: Date.now().toString(),
-            timestamp: new Date().toISOString(),
-            rubAmount: req.body.rubAmount,
-            userId: req.body.userId
-        };
-        list.push(item);
-        saveJson('withdrawals', list);
-        res.status(201).json(item);
-    } catch (err) {
-        console.error('Error creating withdrawal:', err.message);
-        res.status(500).json({ error: 'Internal Server Error' });
-    }
-});
-
-
-app.patch('/api/withdrawals/:id/complete', authenticateToken, restrictTo('mainAdmin'), async (req, res) => {
+apiRouter.patch('/withdrawals/:id/complete', authenticateToken, restrictTo('mainAdmin'), async (req, res) => {
     try {
         let withdrawals = loadJson('withdrawals');
         const idx = withdrawals.findIndex(w => w.id === req.params.id);
@@ -502,8 +469,7 @@ app.patch('/api/withdrawals/:id/complete', authenticateToken, restrictTo('mainAd
         const caption = `✅ Вывод рефералов завершен! №${withdrawal.id}\nКоличество: ${withdrawal.cryptoAmount} BTC (~${withdrawal.rubAmount} RUB)\nКошелёк: ${withdrawal.walletAddress}`;
 
         const config = loadJson('config');
-        const users = loadJson('users');
-        
+
         try {
             const operators = config.multipleOperatorsData.filter(op => op.currency === 'BTC');
             const operator = operators[0] || config.multipleOperatorsData[0];
@@ -553,8 +519,8 @@ app.get('/broadcasts', (req, res) => {
     sendHtmlFile(res, path.join(__dirname, 'public/html/broadcasts.html'));
 });
 
-app.get('/referrals', (req, res) => {
-    sendHtmlFile(res, path.join(__dirname, 'public/html/referrals.html'));
+app.get('/withdrawals', (req, res) => {
+    sendHtmlFile(res, path.join(__dirname, 'public/html/withdrawals.html'));
 });
 
 app.get('/analytics', (req, res) => {
@@ -562,4 +528,8 @@ app.get('/analytics', (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server started on port ${PORT}`));
+const server = app.listen(PORT, () => console.log(`Server started on port ${PORT}`));
+
+['SIGTERM', 'SIGINT'].forEach(signal =>
+    process.on(signal, () => server.close(() => {}))
+);
