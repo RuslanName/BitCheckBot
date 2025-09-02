@@ -304,15 +304,16 @@ apiRouter.patch('/deals/:id/complete', authenticateToken, async (req, res) => {
         const deal = deals[idx];
         const userId = deal.userId;
         const actionText = deal.type === 'buy' ? 'Покупка' : 'Продажа';
-        const caption = `✅ Сделка завершена! №${deal.id}\n${actionText} ${deal.currency}\nКоличество: ${deal.cryptoAmount} ${deal.currency}\nСумма: ${deal.rubAmount} RUB\nКомиссия: ${deal.commission} RUB\nИтог: ${deal.total} RUB\nКошелёк: ${deal.walletAddress}`;
-
         const config = loadJson('config');
+        const priorityPrice = deal.priority === 'elevated' ? config.priorityPriceRub : 0;
+        const caption = `✅ Сделка завершена! №${deal.id}\n${actionText} ${deal.currency}\nКоличество: ${deal.cryptoAmount} ${deal.currency}\nСумма: ${deal.rubAmount} RUB\nКомиссия: ${deal.commission} RUB\nПриоритет: ${deal.priority === 'elevated' ? `Повышенный (+${priorityPrice} RUB)` : 'Обычный'}\nИтог: ${deal.total} RUB\nКошелёк: ${deal.walletAddress}`;
+
         const users = loadJson('users');
 
         try {
             const contactUrl =
                 config.multipleOperatorsMode && config.multipleOperatorsData.length > 0
-                    ? `https://t.me/${(config.multipleOperatorsData.find(op => op.currency === 'BTC') || config.multipleOperatorsData[0]).username}`
+                    ? `https://t.me/${(config.multipleOperatorsData.find(op => op.currency === deal.currency) || config.multipleOperatorsData[0]).username}`
                     : `https://t.me/${config.singleOperatorUsername}`;
 
             const form = new FormData();

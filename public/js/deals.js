@@ -1,5 +1,4 @@
-import { api } from './auth.js';
-import { formatDateTime } from './index.js';
+import { api, formatDateTime } from './index.js';
 
 function initializeDeals(userRole, userCurrency) {
     const curr = window.location.pathname.replace(/\/$/, '').slice(1) || 'config';
@@ -24,8 +23,18 @@ function initializeDeals(userRole, userCurrency) {
     const filterGroup = searchInput.closest('.filter-group') || searchInput.parentElement;
     filterGroup.parentNode.insertBefore(statusToggle, filterGroup.nextSibling);
 
+    const bulkActionContainer = document.createElement('div');
+    bulkActionContainer.className = 'bulk-action-container';
+    bulkActionContainer.style.display = 'none';
+    bulkActionContainer.innerHTML = `
+        <button id="completeSelected">Завершить выбранные</button>
+        <button id="deleteSelected">Удалить выбранные</button>
+        <button id="cancelSelection">Отменить</button>
+    `;
+    filterGroup.appendChild(bulkActionContainer);
+
     if (!tbody || !searchInput || !perPageSelect || !prevBtn || !nextBtn || !pageInfo) {
-        console.error('Missing required elements for deals page');
+        console.error('Отсутствуют необходимые элементы для страницы сделок');
         return;
     }
 
@@ -34,6 +43,7 @@ function initializeDeals(userRole, userCurrency) {
     let page = 1;
     let perPage = parseInt(perPageSelect.value) || 25;
     let showCompleted = false;
+    let selectedDeals = new Set();
 
     Promise.all([
         api.get('/deals'),
@@ -48,12 +58,12 @@ function initializeDeals(userRole, userCurrency) {
         }
         renderDealsTable();
     }).catch(err => {
-        console.error('Error loading data:', err);
+        console.error('Ошибка загрузки данных:', err);
         if (err.response?.status === 401 || err.response?.status === 403) {
             localStorage.removeItem('token');
             window.location.href = '/login';
         } else {
-            tbody.innerHTML = '<tr><td colspan="11">Ошибка загрузки информации</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="12">Ошибка загрузки информации</td></tr>';
         }
     });
 
@@ -91,6 +101,52 @@ function initializeDeals(userRole, userCurrency) {
         renderDealsTable();
     });
 
+    bulkActionContainer.querySelector('#completeSelected').onclick = async () => {
+        try {
+            await Promise.all([...selectedDeals].map(dealId =>
+                api.patch(`/deals/${dealId}/complete`)
+            ));
+            deals = deals.map(d => selectedDeals.has(d.id) ? { ...d, status: 'completed' } : d);
+            selectedDeals.clear();
+            bulkActionContainer.style.display = 'none';
+            renderDealsTable();
+        } catch (err) {
+            console.error('Ошибка завершения выбранных сделок:', err);
+            if (err.response?.status === 401 || err.response?.status === 403) {
+                localStorage.removeItem('token');
+                window.location.href = '/login';
+            } else {
+                alert('Ошибка при завершении сделок');
+            }
+        }
+    };
+
+    bulkActionContainer.querySelector('#deleteSelected').onclick = async () => {
+        try {
+            await Promise.all([...selectedDeals].map(dealId =>
+                api.delete(`/deals/${dealId}`)
+            ));
+            deals = deals.filter(d => !selectedDeals.has(d.id));
+            selectedDeals.clear();
+            bulkActionContainer.style.display = 'none';
+            renderDealsTable();
+        } catch (err) {
+            console.error('Ошибка удаления выбранных сделок:', err);
+            if (err.response?.status === 401 || err.response?.status === 403) {
+                localStorage.removeItem('token');
+                window.location.href = '/login';
+            } else {
+                alert('Ошибка при удалении сделок');
+            }
+        }
+    };
+
+    bulkActionContainer.querySelector('#cancelSelection').onclick = () => {
+        selectedDeals.clear();
+        bulkActionContainer.style.display = 'none';
+        renderDealsTable();
+    };
+
     function filterDeals() {
         const term = searchInput.value.trim().toLowerCase();
         return deals.filter(d => {
@@ -111,6 +167,8 @@ function initializeDeals(userRole, userCurrency) {
         list.sort((a, b) => {
             if (a.status === 'pending' && b.status === 'completed') return -1;
             if (a.status === 'completed' && b.status === 'pending') return 1;
+            if (a.priority === 'elevated' && b.priority !== 'elevated') return -1;
+            if (a.priority !== 'elevated' && b.priority === 'elevated') return 1;
             return 0;
         });
 
@@ -120,13 +178,16 @@ function initializeDeals(userRole, userCurrency) {
 
         tbody.innerHTML = '';
         if (total === 0) {
-            tbody.innerHTML = '<tr><td colspan="11">На данный момент информация отсутствует</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="12">На данный момент информация отсутствует</td></tr>';
+            bulkActionContainer.style.display = 'none';
             return;
         }
 
         slice.forEach(d => {
             const user = users.find(u => u.id === d.userId) || {};
             const tr = document.createElement('tr');
+            tr.className = selectedDeals.has(d.id) ? 'selected' : d.priority === 'elevated' ? 'priority-elevated' : '';
+            tr.dataset.id = d.id;
             tr.innerHTML = `
                 <td>${d.id || '-'}</td>
                 <td><a href="https://t.me/${user.username}" target="_blank">${user.username || d.username}</a></td>
@@ -135,6 +196,7 @@ function initializeDeals(userRole, userCurrency) {
                 <td>${d.rubAmount.toFixed(2)}</td>
                 <td>${d.cryptoAmount.toFixed(8)}</td>
                 <td>${d.commission.toFixed(2)}</td>
+                <td>${d.priority === 'elevated' ? 'Повышенный' : 'Обычный'}</td>
                 <td>${d.total.toFixed(2)}</td>
                 <td>${d.walletAddress}</td>
                 <td>${formatDateTime(d.timestamp)}</td>
@@ -154,11 +216,31 @@ function initializeDeals(userRole, userCurrency) {
         prevBtn.disabled = page === 1;
         nextBtn.disabled = page >= Math.ceil(total / perPage);
 
+        bulkActionContainer.style.display = selectedDeals.size > 0 ? 'flex' : 'none';
+
+        document.querySelectorAll('tr[data-id]').forEach(tr => {
+            tr.onclick = (e) => {
+                if (e.target.tagName === 'BUTTON' || e.target.tagName === 'A') return;
+                const dealId = tr.dataset.id;
+                const deal = deals.find(d => d.id === dealId);
+                if (deal.status === 'completed') return; // Только незавершенные сделки можно выбирать
+                if (selectedDeals.has(dealId)) {
+                    selectedDeals.delete(dealId);
+                    tr.classList.remove('selected');
+                } else {
+                    selectedDeals.add(dealId);
+                    tr.classList.add('selected');
+                }
+                bulkActionContainer.style.display = selectedDeals.size > 0 ? 'flex' : 'none';
+            };
+        });
+
         document.querySelectorAll('.delete-deal').forEach(btn => {
             btn.onclick = () => {
                 const dealId = btn.dataset.id;
                 api.delete(`/deals/${dealId}`).then(() => {
                     deals = deals.filter(d => d.id !== dealId);
+                    selectedDeals.delete(dealId);
                     renderDealsTable();
                 }).catch(err => {
                     if (err.response?.status === 401 || err.response?.status === 403) {
@@ -176,6 +258,7 @@ function initializeDeals(userRole, userCurrency) {
                 const dealId = btn.dataset.id;
                 api.patch(`/deals/${dealId}/complete`).then(() => {
                     deals = deals.map(d => d.id === dealId ? { ...d, status: 'completed' } : d);
+                    selectedDeals.delete(dealId);
                     renderDealsTable();
                 }).catch(err => {
                     if (err.response?.status === 401 || err.response?.status === 403) {

@@ -1,4 +1,4 @@
-import { api } from './auth.js';
+import { api } from './index.js';
 
 function initializeAnalytics() {
     const curr = window.location.pathname.replace(/\/$/, '').slice(1) || 'config';

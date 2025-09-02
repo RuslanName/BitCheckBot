@@ -1,5 +1,4 @@
-import { api } from './auth.js';
-import { formatDateTime } from './index.js';
+import { api, formatDateTime } from './index.js';
 
 async function initializeUsers() {
     const curr = window.location.pathname.replace(/\/$/, '').slice(1) || 'config';

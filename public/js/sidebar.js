@@ -1,5 +1,3 @@
-import { api } from './auth.js';
-
 const links = [
     { href: '/', page: 'config', label: 'Настройки', roles: ['mainAdmin'] },
     { href: '/users', page: 'users', label: 'Пользователи', roles: ['mainAdmin'] },
@@ -13,21 +11,17 @@ function initializeSidebar(userRole) {
     const curr = window.location.pathname.replace(/\/$/, '').slice(1) || 'config';
     const sidebar = document.getElementById('sidebar');
     if (sidebar) {
-        sidebar.innerHTML = '';
-        links.forEach(l => {
-            if (l.roles.includes(userRole)) {
-                const a = document.createElement('a');
-                a.href = l.href;
-                a.textContent = l.label;
-                if (l.page === curr) a.classList.add('active');
-                sidebar.appendChild(a);
+        const sidebarLinks = sidebar.querySelectorAll('a:not(#logoutBtn)');
+        sidebarLinks.forEach(a => {
+            const link = links.find(l => l.href === a.getAttribute('href'));
+            if (link) {
+                if (!link.roles.includes(userRole)) {
+                    a.remove();
+                } else if (link.page === curr) {
+                    a.classList.add('active');
+                }
             }
         });
-        const logoutLink = document.createElement('a');
-        logoutLink.href = '#';
-        logoutLink.id = 'logoutBtn';
-        logoutLink.textContent = 'Выйти';
-        sidebar.appendChild(logoutLink);
         const logoutBtn = sidebar.querySelector('#logoutBtn');
         if (logoutBtn) {
             logoutBtn.addEventListener('click', () => {

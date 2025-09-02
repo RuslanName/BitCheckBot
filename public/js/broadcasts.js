@@ -1,5 +1,4 @@
-import { api } from './auth.js';
-import { formatDateTime } from './index.js';
+import { api, formatDateTime } from './index.js';
 
 function initializeBroadcasts() {
     const curr = window.location.pathname.replace(/\/$/, '').slice(1) || 'config';

@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="/css/styles.css">
     <link rel="icon" type="image/x-icon" href="https://cdn3.iconfinder.com/data/icons/human-resource-management-set-2/64/2-08-1024.png">
 </head>
-<body>
+<body class="no-sidebar">
 <main>
     <section class="form-container">
         <h1>Вход в систему</h1>
@@ -25,23 +25,6 @@
         </form>
     </section>
 </main>
-<script>
-    document.getElementById('loginForm').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const login = document.getElementById('login').value;
-        const password = document.getElementById('password').value;
-        const formError = document.getElementById('formError');
-
-        try {
-            const response = await axios.post('/api/login', { login, password });
-            localStorage.setItem('token', response.data.token);
-            window.location.href = '/';
-        } catch (err) {
-            formError.textContent = err.response?.data?.error || 'Ошибка входа';
-            formError.style.display = 'block';
-        }
-    });
-</script>
 <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
 <script type="module" src="/js/index.js"></script>
 </body>

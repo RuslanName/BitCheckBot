@@ -1043,50 +1043,19 @@ main_bot.on('message', async ctx => {
                 return;
             }
 
-            const rubBefore = states.pendingWallet[id].rubBefore || 0;
-            const rub = states.pendingWallet[id].rub || 0;
-            const commission = states.pendingWallet[id].commission || 0;
-            const amount = states.pendingWallet[id].amount || 0;
-            const discount = await getCommissionDiscount(id);
-
-            const deal = {
-                id: Date.now().toString(),
-                userId: user.id,
-                username: user?.username ? `${user.username}` : 'Нет',
-                type: states.pendingWallet[id].type,
-                currency: states.pendingWallet[id].currency,
-                rubAmount: states.pendingWallet[id].type === 'sell' ? Number(rubBefore.toFixed(2)) : Number(rub.toFixed(2)),
-                cryptoAmount: Number(amount.toFixed(8)),
-                commission: Number(commission.toFixed(2)),
-                total: states.pendingWallet[id].type === 'sell'
-                    ? Number((rubBefore - commission).toFixed(2))
-                    : Number((rub + commission).toFixed(2)),
-                walletAddress: wallet,
-                status: 'draft',
-                timestamp: new Date().toISOString(),
-            };
-
-            try {
-                await ctx.deleteMessage(states.pendingMessageIds[id]);
-            } catch (error) {
-                console.error(`Error deleting message ${states.pendingMessageIds[id]}:`, error.message);
-            }
-            const actionText = states.pendingWallet[id].type === 'buy' ? 'покупки' : 'продажи';
-            const paymentTarget = states.pendingWallet[id].type === 'buy' ? 'Кошелёк' : 'Реквизиты';
+            states.pendingWallet[id].wallet = wallet;
+            const config = loadJson('config');
             const message = await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
-                caption: `✅ Подтверждение ${actionText} ${deal.currency}\nКоличество: ${deal.cryptoAmount} ${states.pendingWallet[id].currency}\nСумма: ${deal.rubAmount} RUB\nКомиссия: ${deal.commission} RUB (скидка ${discount}%)\nИтог: ${deal.total} RUB\n${paymentTarget}: ${deal.walletAddress}`,
+                caption: `💎 Хотите ли вы, чтобы ваша сделка стала выше в очереди? (Цена ${config.priorityPriceRub} RUB)`,
                 reply_markup: {
                     inline_keyboard: [
-                        [{ text: '✅ Создать заявку', callback_data: `submit_${deal.id}` }],
-                        [{ text: '❌ Отменить', callback_data: `cancel_deal_${deal.id}` }]
+                        [{ text: 'Нет', callback_data: 'priority_normal' }, { text: 'Да', callback_data: 'priority_elevated' }],
+                        [{ text: '❌ Отменить', callback_data: 'cancel_action' }]
                     ]
                 }
             });
             states.pendingMessageIds[id] = message.message_id;
-            deals.push(deal);
-            delete states.pendingWallet[id];
             saveJson('states', states);
-            saveJson('deals', deals);
             return;
         }
 
@@ -1191,25 +1160,23 @@ main_bot.on('callback_query', async ctx => {
         }
 
         if (data === 'cancel_action') {
-            const userId = from;
-
             try {
                 await ctx.deleteMessage(ctx.callbackQuery.message.message_id);
             } catch (error) {
                 console.error(`Error deleting callback message ${ctx.callbackQuery.message.message_id}:`, error.message);
             }
 
-            if (states.pendingMessageIds[userId] && states.pendingMessageIds[userId] !== ctx.callbackQuery.message.message_id) {
+            if (states.pendingMessageIds[from] && states.pendingMessageIds[from] !== ctx.callbackQuery.message.message_id) {
                 try {
-                    await ctx.deleteMessage(states.pendingMessageIds[userId]);
+                    await ctx.deleteMessage(states.pendingMessageIds[from]);
                 } catch (error) {
                     console.error(`Error deleting pending message ${states.pendingMessageIds[userId]}:`, error.message);
                 }
             }
 
-            delete states.pendingMessageIds[userId];
+            delete states.pendingMessageIds[from];
 
-            clearPendingStates(states, userId);
+            clearPendingStates(states, from);
 
             saveJson('states', states);
 
@@ -1438,6 +1405,70 @@ main_bot.on('callback_query', async ctx => {
             return;
         }
 
+        if (data === 'priority_normal' || data === 'priority_elevated') {
+            const priority = data === 'priority_normal' ? 'normal' : 'elevated';
+            const walletData = states.pendingWallet[from];
+            if (!walletData) {
+                await ctx.answerCbQuery('❌ Данные сделки не найдены', { show_alert: true });
+                return;
+            }
+
+            const config = loadJson('config');
+            const users = loadJson('users');
+            const user = users.find(u => u.id === from);
+            if (user && user.isBlocked) return;
+
+            const rubBefore = walletData.rubBefore || 0;
+            const rub = walletData.rub || 0;
+            const commission = walletData.commission || 0;
+            const amount = walletData.amount || 0;
+            const discount = await getCommissionDiscount(from);
+            const priorityPrice = priority === 'elevated' ? config.priorityPriceRub : 0;
+
+            const deal = {
+                id: Date.now().toString(),
+                userId: user.id,
+                username: user?.username ? `${user.username}` : 'Нет',
+                type: walletData.type,
+                currency: walletData.currency,
+                rubAmount: walletData.type === 'sell' ? Number(rubBefore.toFixed(2)) : Number(rub.toFixed(2)),
+                cryptoAmount: Number(amount.toFixed(8)),
+                commission: Number(commission.toFixed(2)),
+                total: walletData.type === 'sell'
+                    ? Number((rubBefore - commission - (priority === 'elevated' ? priorityPrice : 0)).toFixed(2))
+                    : Number((rub + commission + priorityPrice).toFixed(2)),
+                walletAddress: walletData.wallet,
+                status: 'draft',
+                priority: priority,
+                timestamp: new Date().toISOString(),
+            };
+
+            try {
+                await ctx.deleteMessage(states.pendingMessageIds[from]);
+            } catch (error) {
+                console.error(`Error deleting message ${states.pendingMessageIds[from]}:`, error.message);
+            }
+
+            const actionText = walletData.type === 'buy' ? 'покупки' : 'продажи';
+            const paymentTarget = walletData.type === 'buy' ? 'Кошелёк' : 'Реквизиты';
+            const message = await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
+                caption: `✅ Подтверждение ${actionText} ${deal.currency}\nКоличество: ${deal.cryptoAmount} ${deal.currency}\nСумма: ${deal.rubAmount} RUB\nКомиссия: ${deal.commission} RUB (скидка ${discount}%)\nПриоритет: ${priority === 'elevated' ? `Повышенный (+${priorityPrice} RUB)` : 'Обычный'}\nИтог: ${deal.total} RUB\n${paymentTarget}: ${deal.walletAddress}`,
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: '✅ Создать заявку', callback_data: `submit_${deal.id}` }],
+                        [{ text: '❌ Отменить', callback_data: `cancel_deal_${deal.id}` }]
+                    ]
+                }
+            });
+            states.pendingMessageIds[from] = message.message_id;
+            deals.push(deal);
+            delete states.pendingWallet[from];
+            saveJson('states', states);
+            saveJson('deals', deals);
+            await ctx.answerCbQuery(`✅ Выбран приоритет: ${priority === 'elevated' ? 'Повышенный' : 'Обычный'}`, { show_alert: false });
+            return;
+        }
+
         if (data.startsWith('submit_')) {
             const dealId = data.split('_')[1];
             const dealIndex = deals.findIndex(d => d.id === dealId && d.status === 'draft');
@@ -1448,16 +1479,14 @@ main_bot.on('callback_query', async ctx => {
 
             const deal = deals[dealIndex];
             deal.status = 'pending';
-            const commission = await calculateCommission(deal.rubAmount, deal.currency, deal.type);
-            const discount = await getCommissionDiscount(deal.userId);
-            deal.commission = commission * (1 - discount / 100);
-            deal.total = deal.rubAmount + deal.commission;
             deals[dealIndex] = deal;
 
             const user = users.find(u => u.id === deal.userId);
             const actionText = deal.type === 'buy' ? 'Покупка' : 'Продажа';
             const paymentTarget = deal.type === 'buy' ? 'Кошелёк' : 'Реквизиты';
             const contactUrl = getContactUrl(deal.currency);
+            const discount = await getCommissionDiscount(deal.userId);
+            const priorityPrice = deal.priority === 'elevated' ? config.priorityPriceRub : 0;
 
             try {
                 await ctx.deleteMessage(states.pendingMessageIds[deal.userId]);
@@ -1465,7 +1494,7 @@ main_bot.on('callback_query', async ctx => {
                 console.error(`Error deleting message ${states.pendingMessageIds[deal.userId]}:`, error.message);
             }
             const message = await ctx.replyWithPhoto({ source: BIT_CHECK_IMAGE_PATH }, {
-                caption: `✅ Заявка на сделку создана! № ${deal.id}\n${actionText} ${deal.currency}\nКоличество: ${deal.cryptoAmount} ${deal.currency}\nСумма: ${deal.rubAmount} RUB\nКомиссия: ${deal.commission.toFixed(2)} RUB (скидка ${discount}%)\nИтог: ${deal.total.toFixed(2)} RUB\n${paymentTarget}: ${deal.walletAddress}\n\nСамостоятельно свяжитесь с оператором для получения реквизитов! ⬇️`,
+                caption: `✅ Заявка на сделку создана! № ${deal.id}\n${actionText} ${deal.currency}\nКоличество: ${deal.cryptoAmount} ${deal.currency}\nСумма: ${deal.rubAmount} RUB\nКомиссия: ${deal.commission.toFixed(2)} RUB (скидка ${discount}%)\nПриоритет: ${deal.priority === 'elevated' ? `Повышенный (+${priorityPrice} RUB)` : 'Обычный'}\nИтог: ${deal.total.toFixed(2)} RUB\n${paymentTarget}: ${deal.walletAddress}\n\nСамостоятельно свяжитесь с оператором для получения реквизитов! ⬇️`,
                 reply_markup: {
                     inline_keyboard: [
                         [{ text: '📞 Написать оператору', url: contactUrl }],
@@ -1481,7 +1510,7 @@ main_bot.on('callback_query', async ctx => {
                     const operatorId = users.find(u => u.username === operator.username)?.id;
                     if (operatorId && await isValidChat(operatorId)) {
                         await main_bot.telegram.sendPhoto(operatorId, { source: BIT_CHECK_IMAGE_PATH }, {
-                            caption: `🆕 Новая заявка на сделку № ${deal.id}\n${actionText} ${deal.currency}\n@${user.username || 'Нет'} (ID ${deal.userId})\nКоличество: ${deal.cryptoAmount}\nСумма: ${deal.rubAmount} RUB\nКомиссия: ${deal.commission.toFixed(2)} RUB (скидка ${discount}%)\nИтог: ${deal.total.toFixed(2)} RUB\n${paymentTarget}: ${deal.walletAddress}`,
+                            caption: `🆕 Новая заявка на сделку № ${deal.id}\n${actionText} ${deal.currency}\n@${user.username || 'Нет'} (ID ${deal.userId})\nКоличество: ${deal.cryptoAmount}\nСумма: ${deal.rubAmount} RUB\nКомиссия: ${deal.commission.toFixed(2)} RUB (скидка ${discount}%)\nПриоритет: ${deal.priority === 'elevated' ? `Повышенный (+${priorityPrice} RUB)` : 'Обычный'}\nИтог: ${deal.total.toFixed(2)} RUB\n${paymentTarget}: ${deal.walletAddress}`,
                             reply_markup: {
                                 inline_keyboard: [
                                     [
@@ -1576,7 +1605,8 @@ main_bot.on('callback_query', async ctx => {
 
                 const userId = deal.userId;
                 const actionText = deal.type === 'buy' ? 'Покупка' : 'Продажа';
-                const caption = `✅ Сделка завершена! №${deal.id}\n${actionText} ${deal.currency}\nКоличество: ${deal.cryptoAmount} ${deal.currency}\nСумма: ${deal.rubAmount} RUB\nКомиссия: ${deal.commission.toFixed(2)} RUB\nИтог: ${deal.total.toFixed(2)} RUB\nКошелёк: ${deal.walletAddress}`;
+                const priorityPrice = deal.priority === 'elevated' ? config.priorityPriceRub : 0;
+                const caption = `✅ Сделка завершена! №${deal.id}\n${actionText} ${deal.currency}\nКоличество: ${deal.cryptoAmount} ${deal.currency}\nСумма: ${deal.rubAmount} RUB\nКомиссия: ${deal.commission.toFixed(2)} RUB\nПриоритет: ${deal.priority === 'elevated' ? `Повышенный (+${priorityPrice} RUB)` : 'Обычный'}\nИтог: ${deal.total.toFixed(2)} RUB\nКошелёк: ${deal.walletAddress}`;
 
                 const contactUrl = getContactUrl(deal.currency);
 

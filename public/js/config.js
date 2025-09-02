@@ -1,4 +1,4 @@
-import { api } from './auth.js';
+import { api } from './index.js';
 
 const arrayKeys = [
     'multipleOperatorsData',
@@ -23,6 +23,7 @@ const paramTranslations = {
     sellCommissionScalePercentBTC: 'Процент комиссии при продаже BTC',
     buyCommissionScalePercentLTC: 'Процент комиссии при покупке LTC',
     sellCommissionScalePercentLTC: 'Процент комиссии при продаже LTC',
+    priorityPriceRub: 'Цена приоритетной сделки (в RUB)',
     referralRevenuePercent: "Процент выручки рефералов",
     commissionDiscounts: 'Процент скидки на комиссию'
 };
