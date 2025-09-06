@@ -276,15 +276,39 @@ apiRouter.delete('/users/:id', authenticateToken, restrictTo('mainAdmin'), (req,
     }
 });
 
-apiRouter.get('/deals', authenticateToken, (req, res) => {
-    let data = loadJson('deals');
-    if (!Array.isArray(data)) {
-        data = Object.values(data);
+apiRouter.get('/deals', authenticateToken, async (req, res) => {
+    try {
+        let data = loadJson('deals');
+        if (!Array.isArray(data)) {
+            data = Object.values(data);
+        }
+        const { search, showCompleted } = req.query;
+        const term = search ? search.trim().toLowerCase() : '';
+        const showCompletedBool = showCompleted === 'true';
+
+        const users = loadJson('users');
+
+        data = data.filter(d => {
+            if (!d || d.status === 'draft') return false;
+            if (showCompletedBool && d.status !== 'completed') return false;
+            if (!showCompletedBool && d.status === 'completed') return false;
+            const user = users.find(u => u.id === d.userId) || {};
+            return (
+                (d.id && d.id.toString().includes(term)) ||
+                (d.userId && d.userId.toString().includes(term)) ||
+                (user.username && user.username.toLowerCase().includes(term))
+            );
+        });
+
+        if (req.user.role === 'admin') {
+            data = data.filter(d => d.currency === req.user.currency);
+        }
+
+        res.json(data);
+    } catch (err) {
+        console.error('Error fetching deals:', err.message);
+        res.status(500).json({ error: 'Internal Server Error' });
     }
-    if (req.user.role === 'admin') {
-        data = data.filter(d => d.currency === req.user.currency);
-    }
-    res.json(data);
 });
 
 apiRouter.patch('/deals/:id/complete', authenticateToken, async (req, res) => {
@@ -441,12 +465,30 @@ apiRouter.delete('/broadcasts/:id', authenticateToken, restrictTo('mainAdmin'), 
     }
 });
 
-apiRouter.get('/withdrawals', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
+apiRouter.get('/withdrawals', authenticateToken, restrictTo('mainAdmin'), async (req, res) => {
     try {
         let data = loadJson('withdrawals');
         if (!Array.isArray(data)) {
             data = Object.values(data);
         }
+
+        const { term = '', showCompleted = 'false' } = req.query;
+        const searchTerm = term.trim().toLowerCase();
+        const showCompletedBool = showCompleted === 'true';
+
+        const users = loadJson('users');
+        data = data.filter(w => {
+            if (!w || w.status === 'draft') return false;
+            if (showCompletedBool && w.status !== 'completed') return false;
+            if (!showCompletedBool && w.status === 'completed') return false;
+            const user = users.find(u => u.id === w.userId) || {};
+            return (
+                (w.id && w.id.toString().includes(searchTerm)) ||
+                (w.userId && w.userId.toString().includes(searchTerm)) ||
+                (user.username && user.username.toLowerCase().includes(searchTerm))
+            );
+        });
+
         res.json(data);
     } catch (err) {
         console.error('Error fetching withdrawals:', err.message);

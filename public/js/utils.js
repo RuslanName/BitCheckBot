@@ -1,0 +1,53 @@
+const api = axios.create({
+    baseURL: "/api"
+});
+
+api.interceptors.request.use(
+    (config) => {
+        const token = localStorage.getItem('token');
+        if (token) {
+            config.headers['Authorization'] = `Bearer ${token}`;
+        }
+        return config;
+    },
+    (error) => Promise.reject(error)
+);
+
+function formatDateTime(isoDate, nullValue = '-') {
+    if (!isoDate) return nullValue;
+    const date = new Date(isoDate);
+    return date.toLocaleString('ru-RU', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+    }).replace(',', '');
+}
+
+function checkAuth(callback) {
+    const curr = window.location.pathname.replace(/\/$/, '').slice(1) || 'config';
+    const token = localStorage.getItem('token');
+    let userRole;
+    let userCurrency;
+
+    if (token) {
+        api.get('/user')
+            .then(response => {
+                userRole = response.data.role || 'admin';
+                userCurrency = response.data.currency;
+                callback(userRole, userCurrency);
+            })
+            .catch(err => {
+                console.error('Ошибка получения данных пользователя:', err);
+                localStorage.removeItem('token');
+                window.location.href = '/login';
+            });
+    } else if (curr !== 'login') {
+        window.location.href = '/login';
+    }
+
+    return { userRole, userCurrency };
+}
+
+export { api, formatDateTime, checkAuth };

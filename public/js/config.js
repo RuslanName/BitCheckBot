@@ -1,7 +1,9 @@
-import { api } from './index.js';
+import { api } from './utils.js';
 
 const arrayKeys = [
     'multipleOperatorsData',
+    'vipUsersData',
+    'buyPaymentDetails',
     'commissionDiscounts',
     'buyCommissionScalePercentBTC',
     'sellCommissionScalePercentBTC',
@@ -11,6 +13,11 @@ const arrayKeys = [
 
 const paramTranslations = {
     multipleOperatorsData: 'Данные операторов',
+    vipUsersData: 'Данные VIP-пользователей',
+    buyPaymentDetails: 'Реквизиты при покупке',
+    sellWalletBTC: 'Адрес BTC кошелька при продаже',
+    sellWalletLTC: 'Адрес LTC кошелька при продаже',
+    paymentDetailsMinCooldown: 'Минимальное время восстановления реквизитов (в минутах)',
     minBuyAmountRubBTC: 'Минимальная покупка в BTC (в RUB)',
     maxBuyAmountRubBTC: 'Максимальная покупка в BTC (в RUB)',
     minSellAmountRubBTC: 'Минимальная продажа в BTC (в RUB)',
@@ -76,7 +83,7 @@ function initializeConfig() {
         toggle.addEventListener('change', async (e) => {
             try {
                 const newStatus = e.target.checked;
-                await api.post('/bot/toggle', { enabled: newStatus });
+                await api.post('/bot/toggle', {enabled: newStatus});
             } catch (err) {
                 console.error('Error updating bot status:', err);
                 await updateBotStatus();
@@ -146,7 +153,7 @@ function initializeConfig() {
             const login = document.getElementById('adminLogin').value;
             const password = document.getElementById('adminPassword').value;
             try {
-                await api.put('/config/credentials', { login, password });
+                await api.put('/config/credentials', {login, password});
             } catch (err) {
                 console.error('Error updating credentials:', err);
             }
@@ -211,6 +218,32 @@ function initializeConfig() {
                     </div>
                 `;
             }
+        } else if (key === 'vipUsersData') {
+            itemsHtml = currentValue.length > 0 ? currentValue.map((item, idx) => `
+                <div class="array-item">
+                    <input type="text" value="${item.username}" data-idx="${idx}" class="array-input vip-username" placeholder="Имя VIP-пользователя" />
+                    <input type="number" value="${item.discount || ''}" data-idx="${idx}" class="array-input discount" placeholder="Скидка (в %)" />
+                    <button class="remove-item" data-idx="${idx}">Удалить</button>
+                </div>
+            `).join('') : `
+                <div class="array-item">
+                    <input type="text" value="" data-idx="0" class="array-input vip-username" placeholder="Имя VIP-пользователя" />
+                    <input type="number" value="" data-idx="0" class="array-input discount" placeholder="Скидка (в %)" />
+                    <button class="remove-item" data-idx="0">Удалить</button>
+                </div>
+            `;
+        } else if (key === 'buyPaymentDetails') {
+            itemsHtml = currentValue.length > 0 ? currentValue.map((item, idx) => `
+                <div class="array-item">
+                    <input type="text" value="${item.description}" data-idx="${idx}" class="array-input description" placeholder="Описание" />
+                    <button class="remove-item" data-idx="${idx}">Удалить</button>
+                </div>
+            `).join('') : `
+                <div class="array-item">
+                    <input type="text" value="" data-idx="0" class="array-input description" placeholder="Описание" />
+                    <button class="remove-item" data-idx="0">Удалить</button>
+                </div>
+            `;
         } else if (key === 'commissionDiscounts' ||
             key === 'buyCommissionScalePercentBTC' ||
             key === 'sellCommissionScalePercentBTC' ||
@@ -305,26 +338,37 @@ function initializeConfig() {
                 const idx = itemsDiv.children.length;
                 const itemDiv = document.createElement('div');
                 itemDiv.className = 'array-item';
-                if (key === 'commissionDiscounts' ||
+                if (key === 'vipUsersData') {
+                    itemDiv.innerHTML = `
+                    <input type="text" value="" data-idx="${idx}" class="array-input vip-username" placeholder="Имя VIP-пользователя" />
+                    <input type="number" value="" data-idx="${idx}" class="array-input discount" placeholder="Скидка (в %)" />
+                    <button class="remove-item" data-idx="${idx}">Удалить</button>
+                `;
+                } else if (key === 'buyPaymentDetails') {
+                    itemDiv.innerHTML = `
+                    <input type="text" value="" data-idx="${idx}" class="array-input description" placeholder="Описание" />
+                    <button class="remove-item" data-idx="${idx}">Удалить</button>
+                `;
+                } else if (key === 'commissionDiscounts' ||
                     key === 'buyCommissionScalePercentBTC' ||
                     key === 'sellCommissionScalePercentBTC' ||
                     key === 'buyCommissionScalePercentLTC' ||
                     key === 'sellCommissionScalePercentLTC') {
                     itemDiv.innerHTML = `
-                        <input type="number" value="" data-idx="${idx}" class="array-input amount" placeholder="Количество (в RUB)" />
-                        <input type="number" value="" data-idx="${idx}" class="array-input ${key.includes('Commission') ? 'commission' : 'discount'}" placeholder="${key.includes('Commission') ? 'Комиссия (в %)' : 'Скидка (в %)'}"/>
-                        <button class="remove-item" data-idx="${idx}">Удалить</button>
-                    `;
+                    <input type="number" value="" data-idx="${idx}" class="array-input amount" placeholder="Количество (в RUB)" />
+                    <input type="number" value="" data-idx="${idx}" class="array-input ${key.includes('Commission') ? 'commission' : 'discount'}" placeholder="${key.includes('Commission') ? 'Комиссия (в %)' : 'Скидка (в %)'}"/>
+                    <button class="remove-item" data-idx="${idx}">Удалить</button>
+                `;
                 } else if (key === 'multipleOperatorsData') {
                     itemDiv.innerHTML = `
-                        <input type="text" value="" data-idx="${idx}" class="array-input operator-username" placeholder="Имя оператора" />
-                        <input type="text" value="" data-idx="${idx}" class="array-input operator-password" placeholder="Пароль" />
-                        <select data-idx="${idx}" class="array-input currency-select">
-                            <option value="BTC">BTC</option>
-                            <option value="LTC">LTC</option>
-                        </select>
-                        <button class="remove-item" data-idx="${idx}">Удалить</button>
-                    `;
+                    <input type="text" value="" data-idx="${idx}" class="array-input operator-username" placeholder="Имя оператора" />
+                    <input type="text" value="" data-idx="${idx}" class="array-input operator-password" placeholder="Пароль" />
+                    <select data-idx="${idx}" class="array-input currency-select">
+                        <option value="BTC">BTC</option>
+                        <option value="LTC">LTC</option>
+                    </select>
+                    <button class="remove-item" data-idx="${idx}">Удалить</button>
+                `;
                 }
                 itemsDiv.appendChild(itemDiv);
                 bindRemoveButtons(modal);
@@ -357,6 +401,20 @@ function initializeConfig() {
                     });
                     updatedConfig.multipleOperatorsData = items.filter(item => item.username);
                 }
+            } else if (key === 'vipUsersData') {
+                const items = Array.from(itemsDiv.children).map(item => {
+                    const username = item.querySelector('.vip-username').value.trim();
+                    const discount = parseFloat(item.querySelector('.discount').value);
+                    return { username, discount: isNaN(discount) ? 0 : discount };
+                });
+                updatedConfig.vipUsersData = items.filter(item => item.username);
+            } else if (key === 'buyPaymentDetails') {
+                const items = Array.from(itemsDiv.children).map(item => {
+                    const description = item.querySelector('.description').value.trim();
+                    const timestamp = new Date().toISOString();
+                    return { description, timestamp };
+                });
+                updatedConfig.buyPaymentDetails = items.filter(item => item.description);
             } else if (key === 'commissionDiscounts' ||
                 key === 'buyCommissionScalePercentBTC' ||
                 key === 'sellCommissionScalePercentBTC' ||
@@ -392,21 +450,36 @@ function initializeConfig() {
             modal.querySelectorAll('.remove-item').forEach(btn => {
                 btn.onclick = () => {
                     btn.parentElement.remove();
-                    if (key === 'multipleOperatorsData' && modal.querySelector('#singleOperatorToggle')?.checked && modal.querySelectorAll('.array-item').length === 0) {
-                        const idx = 0;
-                        const itemDiv = document.createElement('div');
-                        itemDiv.className = 'array-item';
-                        itemDiv.innerHTML = `
-                            <input type="text" value="" data-idx="${idx}" class="array-input operator-username" placeholder="Имя оператора" />
-                            <input type="text" value="" data-idx="${idx}" class="array-input operator-password" placeholder="Пароль" />
-                            <select data-idx="${idx}" class="array-input currency-select">
-                                <option value="BTC">BTC</option>
-                                <option value="LTC">LTC</option>
-                            </select>
-                            <button class="remove-item" data-idx="${idx}">Удалить</button>
-                        `;
-                        modal.querySelector('#array-items').appendChild(itemDiv);
-                        bindRemoveButtons(modal);
+                    if ((key === 'multipleOperatorsData' && modal.querySelector('#singleOperatorToggle')?.checked) || key === 'vipUsersData' || key === 'buyPaymentDetails') {
+                        if (modal.querySelectorAll('.array-item').length === 0) {
+                            const idx = 0;
+                            const itemDiv = document.createElement('div');
+                            itemDiv.className = 'array-item';
+                            if (key === 'vipUsersData') {
+                                itemDiv.innerHTML = `
+                                    <input type="text" value="" data-idx="${idx}" class="array-input vip-username" placeholder="Имя VIP-пользователя" />
+                                    <input type="number" value="" data-idx="${idx}" class="array-input discount" placeholder="Скидка (в %)" />
+                                    <button class="remove-item" data-idx="${idx}">Удалить</button>
+                                `;
+                            } else if (key === 'buyPaymentDetails') {
+                                itemDiv.innerHTML = `
+                                    <input type="text" value="" data-idx="${idx}" class="array-input description" placeholder="Описание" />
+                                    <button class="remove-item" data-idx="${idx}">Удалить</button>
+                                `;
+                            } else {
+                                itemDiv.innerHTML = `
+                                    <input type="text" value="" data-idx="${idx}" class="array-input operator-username" placeholder="Имя оператора" />
+                                    <input type="text" value="" data-idx="${idx}" class="array-input operator-password" placeholder="Пароль" />
+                                    <select data-idx="${idx}" class="array-input currency-select">
+                                        <option value="BTC">BTC</option>
+                                        <option value="LTC">LTC</option>
+                                    </select>
+                                    <button class="remove-item" data-idx="${idx}">Удалить</button>
+                                `;
+                            }
+                            modal.querySelector('#array-items').appendChild(itemDiv);
+                            bindRemoveButtons(modal);
+                        }
                     }
                 };
             });
@@ -445,6 +518,26 @@ function initializeConfig() {
                         }
                         displayValue = displayValue || '-';
                     }
+                } else if (key === 'vipUsersData') {
+                    const formattedItems = value.map(item => `${item.username}: ${item.discount}`);
+                    displayValue = '';
+                    for (let i = 0; i < formattedItems.length; i += 2) {
+                        const pair = [formattedItems[i]];
+                        if (i + 1 < formattedItems.length) pair.push(formattedItems[i + 1]);
+                        displayValue += pair.join(' | ');
+                        if (i + 2 < formattedItems.length) displayValue += '<br>';
+                    }
+                    displayValue = displayValue || '-';
+                } else if (key === 'buyPaymentDetails') {
+                    const formattedItems = value.map(item => `${item.description}`);
+                    displayValue = '';
+                    for (let i = 0; i < formattedItems.length; i += 2) {
+                        const pair = [formattedItems[i]];
+                        if (i + 1 < formattedItems.length) pair.push(formattedItems[i + 1]);
+                        displayValue += pair.join(' | ');
+                        if (i + 2 < formattedItems.length) displayValue += '<br>';
+                    }
+                    displayValue = displayValue || '-';
                 } else if (key === 'commissionDiscounts' ||
                     key === 'buyCommissionScalePercentBTC' ||
                     key === 'sellCommissionScalePercentBTC' ||
@@ -505,4 +598,4 @@ function initializeConfig() {
     }
 }
 
-export { initializeConfig };
+initializeConfig();

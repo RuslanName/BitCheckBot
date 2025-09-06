@@ -1,6 +1,4 @@
-const api = axios.create({
-    baseURL: "/api"
-});
+import { api } from './utils.js';
 
 function handleLogin() {
     const curr = window.location.pathname.replace(/\/$/, '').slice(1) || 'config';
@@ -35,4 +33,4 @@ function handleLogin() {
     }
 }
 
-export { handleLogin };
+handleLogin();
