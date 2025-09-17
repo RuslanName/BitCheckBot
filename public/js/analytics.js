@@ -13,11 +13,6 @@ function initializeAnalytics() {
         const commissionTable = document.querySelector('#commissionAnalyticsTable tbody');
         const usersTable = document.querySelector('#usersAnalyticsTable tbody');
 
-        if (!dealsTable || !commissionTable || !usersTable) {
-            console.error('Missing required elements for analytics page');
-            return;
-        }
-
         let deals = [];
         let users = [];
 

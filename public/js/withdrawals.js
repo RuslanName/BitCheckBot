@@ -16,17 +16,14 @@ function initializeWithdrawals() {
         const nextBtn = document.getElementById('nextPage');
         const pageInfo = document.getElementById('pageInfo');
 
-        const statusToggle = document.createElement('div');
-        statusToggle.className = 'toggle-container';
-        statusToggle.innerHTML = `
-            <label class="switch">
-                <input type="checkbox" id="statusToggle" />
-                <span class="slider round"></span>
-            </label>
-            <span class="toggle-label">Открытые выводы</span>
+        const tabContainer = document.createElement('div');
+        tabContainer.className = 'tab-container';
+        tabContainer.innerHTML = `
+            <button class="tab-button active" data-status="open">Открытые</button>
+            <button class="tab-button" data-status="completed">Завершенные</button>
         `;
         const filterGroup = searchInput.closest('.filter-group') || searchInput.parentElement;
-        filterGroup.parentNode.insertBefore(statusToggle, filterGroup.nextSibling);
+        filterGroup.parentNode.insertBefore(tabContainer, filterGroup.nextSibling);
 
         const bulkActionContainer = document.createElement('div');
         bulkActionContainer.className = 'bulk-action-container';
@@ -37,17 +34,13 @@ function initializeWithdrawals() {
         `;
         filterGroup.appendChild(bulkActionContainer);
 
-        if (!tbody || !searchInput || !perPageSelect || !prevBtn || !nextBtn || !pageInfo) {
-            console.error('Отсутствуют необходимые элементы для страницы выводов');
-            return;
-        }
-
         let withdrawals = [];
         let users = [];
         let page = 1;
         let perPage = parseInt(perPageSelect.value) || 25;
         let showCompleted = false;
         let selectedWithdrawals = new Set();
+        let lastSelectedWithdrawalId = null;
 
         Promise.all([
             api.get('/withdrawals'),
@@ -91,13 +84,14 @@ function initializeWithdrawals() {
             }
         };
 
-        statusToggle.querySelector('#statusToggle').addEventListener('change', (e) => {
-            showCompleted = e.target.checked;
-            page = 1;
-            statusToggle.querySelector('.toggle-label').textContent = showCompleted
-                ? 'Завершенные выводы'
-                : 'Открытые выводы';
-            renderWithdrawalsTable();
+        tabContainer.querySelectorAll('.tab-button').forEach(button => {
+            button.addEventListener('click', () => {
+                tabContainer.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
+                button.classList.add('active');
+                showCompleted = button.dataset.status === 'completed';
+                page = 1;
+                renderWithdrawalsTable();
+            });
         });
 
         bulkActionContainer.querySelector('#completeSelected').onclick = async () => {
@@ -107,37 +101,29 @@ function initializeWithdrawals() {
                 ));
                 withdrawals = withdrawals.map(w => selectedWithdrawals.has(w.id) ? { ...w, status: 'completed' } : w);
                 selectedWithdrawals.clear();
-                bulkActionContainer.style.display = 'none';
                 renderWithdrawalsTable();
             } catch (err) {
-                console.error('Ошибка завершения выбранных выводов:', err);
+                console.error('Error completing selected withdrawals:', err);
                 if (err.response?.status === 401 || err.response?.status === 403) {
                     localStorage.removeItem('token');
                     window.location.href = '/login';
-                } else {
-                    alert('Ошибка при завершении выводов');
                 }
             }
         };
 
         bulkActionContainer.querySelector('#cancelSelection').onclick = () => {
             selectedWithdrawals.clear();
-            bulkActionContainer.style.display = 'none';
+            lastSelectedWithdrawalId = null;
             renderWithdrawalsTable();
         };
 
         function filterWithdrawals() {
             const term = searchInput.value.trim().toLowerCase();
             return withdrawals.filter(w => {
-                if (!w || w.status === 'draft') return false;
-                if (showCompleted && w.status !== 'completed') return false;
-                if (!showCompleted && w.status === 'completed') return false;
-                const user = users.find(u => u.id === w.userId) || {};
-                return (
-                    (w.id && w.id.toString().includes(term)) ||
-                    (w.userId && w.userId.toString().includes(term)) ||
-                    (user.username && user.username.toLowerCase().includes(term))
-                );
+                const user = users.find(u => u.id === w.userId);
+                const username = user ? user.username : w.userId;
+                return (username.toLowerCase().includes(term) || w.id.includes(term)) &&
+                    w.status === (showCompleted ? 'completed' : 'pending');
             });
         }
 
@@ -150,26 +136,29 @@ function initializeWithdrawals() {
             tbody.innerHTML = '';
             if (total === 0) {
                 tbody.innerHTML = '<tr><td colspan="7">На данный момент информация отсутствует</td></tr>';
-                bulkActionContainer.style.display = 'none';
                 return;
             }
 
             slice.forEach(w => {
-                const user = users.find(u => u.id === w.userId) || {};
+                const buttonId = w.id;
+                const user = users.find(u => u.id === w.userId);
+                const username = user ? user.username : w.userId;
                 const tr = document.createElement('tr');
-                tr.className = selectedWithdrawals.has(w.id) ? 'selected' : '';
-                tr.dataset.id = w.id;
+                tr.dataset.id = buttonId;
+                if (selectedWithdrawals.has(buttonId)) {
+                    tr.classList.add('selected');
+                }
                 tr.innerHTML = `
-                    <td>${w.id || '-'}</td>
-                    <td><a href="https://t.me/${user.username}" target="_blank">${user.username || '-'}</a></td>
-                    <td>${w.rubAmount.toFixed(2)}</td>
-                    <td>${w.cryptoAmount.toFixed(8)}</td>
+                    <td>${buttonId}</td>
+                    <td>${username}</td>
+                    <td>${w.rubAmount}</td>
+                    <td>${w.cryptoAmount}</td>
                     <td>${w.walletAddress}</td>
                     <td>${formatDateTime(w.timestamp)}</td>
                     <td>
                         ${w.status === 'completed'
-                    ? '<button class="complete-withdrawal" data-id="${w.id}" disabled>Завершено</button>'
-                    : '<button class="complete-withdrawal" data-id="${w.id}">Завершить</button>'}
+                    ? `<button class="complete-withdrawal" data-id="${buttonId}" disabled>Завершено</button>`
+                    : `<button class="complete-withdrawal" data-id="${buttonId}">Завершить</button>`}
                     </td>
                 `;
                 tbody.appendChild(tr);
@@ -184,16 +173,42 @@ function initializeWithdrawals() {
             document.querySelectorAll('tr[data-id]').forEach(tr => {
                 tr.onclick = (e) => {
                     if (e.target.tagName === 'BUTTON' || e.target.tagName === 'A') return;
+                    e.preventDefault();
                     const withdrawalId = tr.dataset.id;
                     const withdrawal = withdrawals.find(w => w.id === withdrawalId);
                     if (withdrawal.status === 'completed') return;
-                    if (selectedWithdrawals.has(withdrawalId)) {
-                        selectedWithdrawals.delete(withdrawalId);
-                        tr.classList.remove('selected');
-                    } else {
-                        selectedWithdrawals.add(withdrawalId);
-                        tr.classList.add('selected');
+
+                    if (e.ctrlKey || e.shiftKey) {
+                        if (e.shiftKey && lastSelectedWithdrawalId) {
+                            const allRows = Array.from(document.querySelectorAll('tr[data-id]'));
+                            const currentIndex = allRows.findIndex(row => row.dataset.id === withdrawalId);
+                            const lastIndex = allRows.findIndex(row => row.dataset.id === lastSelectedWithdrawalId);
+                            const startIndex = Math.min(currentIndex, lastIndex);
+                            const endIndex = Math.max(currentIndex, lastIndex);
+
+                            for (let i = startIndex; i <= endIndex; i++) {
+                                const rowWithdrawalId = allRows[i].dataset.id;
+                                const rowWithdrawal = withdrawals.find(w => w.id === rowWithdrawalId);
+                                if (rowWithdrawal.status !== 'completed' && !selectedWithdrawals.has(rowWithdrawalId)) {
+                                    selectedWithdrawals.add(rowWithdrawalId);
+                                    allRows[i].classList.add('selected');
+                                }
+                            }
+                        } else if (e.ctrlKey) {
+                            if (selectedWithdrawals.has(withdrawalId)) {
+                                selectedWithdrawals.delete(withdrawalId);
+                                tr.classList.remove('selected');
+                                lastSelectedWithdrawalId = Array.from(selectedWithdrawals).pop() || null;
+                            } else {
+                                selectedWithdrawals.add(withdrawalId);
+                                tr.classList.add('selected');
+                                lastSelectedWithdrawalId = withdrawalId;
+                            }
+                        }
                     }
+
+                    const table = document.querySelector('table');
+                    table.style.userSelect = selectedWithdrawals.size > 0 ? 'none' : 'auto';
                     bulkActionContainer.style.display = selectedWithdrawals.size > 0 ? 'flex' : 'none';
                 };
             });
@@ -210,7 +225,7 @@ function initializeWithdrawals() {
                             localStorage.removeItem('token');
                             window.location.href = '/login';
                         } else {
-                            console.error('Ошибка завершения вывода:', err);
+                            console.error('Error completing withdrawals:', err);
                         }
                     });
                 };

@@ -5,13 +5,13 @@
   "main": "main_bot.js",
   "scripts": {
     "start_main_bot": "node main_bot.js",
-    "start_web": "node server.js",
     "start_spam_bot": "node spam_bot.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "async": "^3.2.6",
     "axios": "^1.11.0",
     "body-parser": "^2.2.0",
     "cors": "^2.8.5",

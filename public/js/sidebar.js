@@ -3,6 +3,7 @@ const links = [
     { href: '/users', page: 'users', label: 'Пользователи', roles: ['mainAdmin'] },
     { href: '/deals', page: 'deals', label: 'Сделки', roles: ['mainAdmin', 'admin'] },
     { href: '/withdrawals', page: 'withdrawals', label: 'Вывод рефералов', roles: ['mainAdmin'] },
+    { href: '/raffles', page: 'raffles', label: 'Розыгрыши', roles: ['mainAdmin'] },
     { href: '/broadcasts', page: 'broadcasts', label: 'Рассылка', roles: ['mainAdmin'] },
     { href: '/analytics', page: 'analytics', label: 'Аналитика', roles: ['mainAdmin'] }
 ];

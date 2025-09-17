@@ -1,4 +1,5 @@
-import { api } from './utils.js';
+import { api, checkAuth } from './utils.js';
+import { initializeSidebar, checkAccess } from './sidebar.js';
 
 const arrayKeys = [
     'multipleOperatorsData',
@@ -15,9 +16,10 @@ const paramTranslations = {
     multipleOperatorsData: 'Данные операторов',
     vipUsersData: 'Данные VIP-пользователей',
     buyPaymentDetails: 'Реквизиты при покупке',
+    paymentDetailsRecoveryTimeMinutes: "Время восстановления реквизитов при покупке (в минутах)",
     sellWalletBTC: 'Адрес BTC кошелька при продаже',
     sellWalletLTC: 'Адрес LTC кошелька при продаже',
-    paymentDetailsMinCooldown: 'Минимальное время восстановления реквизитов (в минутах)',
+    minWithdrawAmountRub: 'Минимальная сумма для вывода средств (в RUB)',
     minBuyAmountRubBTC: 'Минимальная покупка в BTC (в RUB)',
     maxBuyAmountRubBTC: 'Максимальная покупка в BTC (в RUB)',
     minSellAmountRubBTC: 'Минимальная продажа в BTC (в RUB)',
@@ -39,176 +41,358 @@ function initializeConfig() {
     const curr = window.location.pathname.replace(/\/$/, '').slice(1) || 'config';
     if (curr !== 'config') return;
 
-    const tbody = document.querySelector('#configTable tbody');
-    const searchInput = document.getElementById('searchId');
-    const perPageSelect = document.getElementById('perPage');
-    const prevBtn = document.getElementById('prevPage');
-    const nextBtn = document.getElementById('nextPage');
-    const pageInfo = document.getElementById('pageInfo');
-    const credentialsForm = document.getElementById('credentialsForm');
-    const adminLoginInput = document.getElementById('adminLogin');
-    const adminPasswordInput = document.getElementById('adminPassword');
+    checkAuth((userRole) => {
+        initializeSidebar(userRole);
+        if (!checkAccess(userRole)) return;
 
-    let config = {};
-    let page = 1;
-    let perPage = parseInt(perPageSelect.value) || 5;
+        const tbody = document.querySelector('#configTable tbody');
+        const searchInput = document.getElementById('searchId');
+        const perPageSelect = document.getElementById('perPage');
+        const prevBtn = document.getElementById('prevPage');
+        const nextBtn = document.getElementById('nextPage');
+        const pageInfo = document.getElementById('pageInfo');
+        const credentialsForm = document.getElementById('credentialsForm');
+        const adminLoginInput = document.getElementById('adminLogin');
+        const adminPasswordInput = document.getElementById('adminPassword');
 
-    const statusToggle = document.createElement('div');
-    statusToggle.className = 'toggle-container';
-    statusToggle.innerHTML = `
+        let config = {};
+        let page = 1;
+        let perPage = parseInt(perPageSelect.value) || 5;
+
+        const statusToggle = document.createElement('div');
+        statusToggle.className = 'toggle-container';
+        statusToggle.innerHTML = `
         <label class="switch">
             <input type="checkbox" id="botStatusToggle" />
             <span class="slider round"></span>
         </label>
         <span class="toggle-label">Статус бота</span>
     `;
-    if (credentialsForm) {
-        credentialsForm.parentNode.insertBefore(statusToggle, credentialsForm.nextSibling);
-    }
-
-    async function updateBotStatus() {
-        try {
-            const response = await api.get('/bot/status');
-            const toggle = document.getElementById('botStatusToggle');
-            if (toggle) {
-                toggle.checked = response.data.botEnabled;
-            }
-        } catch (err) {
-            console.error('Error fetching bot status:', err);
+        if (credentialsForm) {
+            credentialsForm.parentNode.insertBefore(statusToggle, credentialsForm.nextSibling);
         }
-    }
 
-    const toggle = document.getElementById('botStatusToggle');
-    if (toggle) {
-        toggle.addEventListener('change', async (e) => {
+        async function updateBotStatus() {
             try {
-                const newStatus = e.target.checked;
-                await api.post('/bot/toggle', {enabled: newStatus});
+                const response = await api.get('/bot/status');
+                const toggle = document.getElementById('botStatusToggle');
+                if (toggle) {
+                    toggle.checked = response.data.botEnabled;
+                }
             } catch (err) {
-                console.error('Error updating bot status:', err);
-                await updateBotStatus();
+                console.error('Error fetching bot status:', err);
             }
-        });
-    }
-
-    const checkBtn = document.getElementById('checkBotStatus');
-    if (checkBtn) {
-        checkBtn.addEventListener('click', updateBotStatus);
-    }
-
-    updateBotStatus();
-
-    api.get('/config').then(r => {
-        config = r.data;
-        renderConfigTable();
-    }).catch(err => {
-        console.error('Error loading config:', err);
-        if (err.response?.status === 401 || err.response?.status === 403) {
-            localStorage.removeItem('token');
-            window.location.href = '/login';
-        } else {
-            tbody.innerHTML = '<tr><td colspan="2">Ошибка загрузки информации</td></tr>';
         }
-    });
 
-    api.get('/config/credentials').then(r => {
-        const credentials = r.data;
-        if (adminLoginInput && adminPasswordInput) {
-            adminLoginInput.value = credentials.login || '';
-            adminPasswordInput.value = credentials.password || '';
+        const toggle = document.getElementById('botStatusToggle');
+        if (toggle) {
+            toggle.addEventListener('change', async (e) => {
+                try {
+                    const newStatus = e.target.checked;
+                    await api.post('/bot/toggle', {enabled: newStatus});
+                } catch (err) {
+                    console.error('Error updating bot status:', err);
+                    await updateBotStatus();
+                }
+            });
         }
-    }).catch(err => {
-        console.error('Error loading credentials:', err);
-        if (err.response?.status === 401 || err.response?.status === 403) {
-            localStorage.removeItem('token');
-            window.location.href = '/login';
-        }
-    });
 
-    searchInput.addEventListener('input', () => {
-        page = 1;
-        renderConfigTable();
-    });
-    perPageSelect.addEventListener('change', (e) => {
-        perPage = parseInt(e.target.value) || 10;
-        page = 1;
-        renderConfigTable();
-    });
-    prevBtn.onclick = () => {
-        if (page > 1) {
-            page--;
+        const checkBtn = document.getElementById('checkBotStatus');
+        if (checkBtn) {
+            checkBtn.addEventListener('click', updateBotStatus);
+        }
+
+        updateBotStatus();
+
+        api.get('/config').then(r => {
+            config = r.data;
             renderConfigTable();
-        }
-    };
-    nextBtn.onclick = () => {
-        if (page < Math.ceil(filterConfig().length / perPage)) {
-            page++;
+        }).catch(err => {
+            console.error('Error loading config:', err);
+            if (err.response?.status === 401 || err.response?.status === 403) {
+                localStorage.removeItem('token');
+                window.location.href = '/login';
+            } else {
+                tbody.innerHTML = '<tr><td colspan="2">Ошибка загрузки информации</td></tr>';
+            }
+        });
+
+        api.get('/config/credentials').then(r => {
+            const credentials = r.data;
+            if (adminLoginInput && adminPasswordInput) {
+                adminLoginInput.value = credentials.login || '';
+                adminPasswordInput.value = credentials.password || '';
+            }
+        }).catch(err => {
+            console.error('Error loading credentials:', err);
+            if (err.response?.status === 401 || err.response?.status === 403) {
+                localStorage.removeItem('token');
+                window.location.href = '/login';
+            }
+        });
+
+        searchInput.addEventListener('input', () => {
+            page = 1;
             renderConfigTable();
+        });
+        perPageSelect.addEventListener('change', (e) => {
+            perPage = parseInt(e.target.value) || 10;
+            page = 1;
+            renderConfigTable();
+        });
+        prevBtn.onclick = () => {
+            if (page > 1) {
+                page--;
+                renderConfigTable();
+            }
+        };
+        nextBtn.onclick = () => {
+            if (page < Math.ceil(filterConfig().length / perPage)) {
+                page++;
+                renderConfigTable();
+            }
+        };
+
+        if (credentialsForm) {
+            credentialsForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const login = document.getElementById('adminLogin').value;
+                const password = document.getElementById('adminPassword').value;
+                try {
+                    await api.put('/config/credentials', {login, password});
+                } catch (err) {
+                    console.error('Error updating credentials:', err);
+                }
+            });
         }
-    };
 
-    if (credentialsForm) {
-        credentialsForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const login = document.getElementById('adminLogin').value;
-            const password = document.getElementById('adminPassword').value;
-            try {
-                await api.put('/config/credentials', {login, password});
-            } catch (err) {
-                console.error('Error updating credentials:', err);
+        function filterConfig() {
+            const term = searchInput.value.trim().toLowerCase();
+            return Object.entries(config).filter(([key]) => {
+                if (!paramTranslations[key]) {
+                    console.warn(`key "${key}" not found in paramTranslations`);
+                    return false;
+                }
+                return paramTranslations[key].toLowerCase().includes(term);
+            });
+        }
+
+        function openArrayEditor(key) {
+            const currentValue = config[key] || [];
+            const modal = document.createElement('div');
+            modal.className = 'modal';
+            let itemsHtml = '';
+            let singleOperatorModeHtml = '';
+
+            if (key === 'multipleOperatorsData') {
+                const isMultipleOperatorMode = config.multipleOperatorsMode;
+                singleOperatorModeHtml = `
+            <div class="toggle-container single-operator-toggle">
+                <label class="switch">
+                    <input type="checkbox" id="singleOperatorToggle" ${isMultipleOperatorMode ? 'checked' : ''} />
+                    <span class="slider round"></span>
+                </label>
+                <span class="toggle-label">Множественное управление операторами</span>
+            </div>
+        `;
             }
-        });
-    }
 
-    function filterConfig() {
-        const term = searchInput.value.trim().toLowerCase();
-        return Object.entries(config).filter(([key]) => {
-            if (!paramTranslations[key]) {
-                console.warn(`key "${key}" not found in paramTranslations`);
-                return false;
-            }
-            return paramTranslations[key].toLowerCase().includes(term);
-        });
-    }
-
-    function openArrayEditor(key) {
-        const currentValue = config[key] || [];
-        const modal = document.createElement('div');
-        modal.className = 'modal';
-        let itemsHtml = '';
-        let singleOperatorModeHtml = '';
-
-        if (key === 'multipleOperatorsData') {
-            const isMultipleOperatorMode = config.multipleOperatorsMode;
-            singleOperatorModeHtml = `
-                <div class="toggle-container single-operator-toggle">
-                    <label class="switch">
-                        <input type="checkbox" id="singleOperatorToggle" ${isMultipleOperatorMode ? 'checked' : ''} />
-                        <span class="slider round"></span>
-                    </label>
-                    <span class="toggle-label">Множественное управление операторами</span>
+            currentValue.forEach((item, idx) => {
+                if (key === 'vipUsersData') {
+                    itemsHtml += `
+                <div class="array-item">
+                    <input type="text" value="${item.username || ''}" data-idx="${idx}" class="array-input username" placeholder="Имя пользователя" />
+                    <input type="number" value="${item.discount || ''}" data-idx="${idx}" class="array-input discount" placeholder="Скидка (в %)" />
+                    <button class="remove-item" data-idx="${idx}">Удалить</button>
                 </div>
             `;
-            if (!isMultipleOperatorMode) {
-                itemsHtml = `
+                } else if (key === 'buyPaymentDetails') {
+                    itemsHtml += `
+                <div class="array-item">
+                    <textarea data-idx="${idx}" class="array-input description" placeholder="Описание">${item.description || ''}</textarea>
+                    <button class="remove-item" data-idx="${idx}">Удалить</button>
+                </div>
+            `;
+                } else if (key.includes('CommissionScalePercent')) {
+                    itemsHtml += `
+                <div class="array-item">
+                    <input type="number" value="${item.amount || ''}" data-idx="${idx}" class="array-input amount" placeholder="Сумма" />
+                    <input type="number" value="${item.commission || ''}" data-idx="${idx}" class="array-input commission" placeholder="Комиссия (в %)" />
+                    <button class="remove-item" data-idx="${idx}">Удалить</button>
+                </div>
+            `;
+                } else if (key === 'commissionDiscounts') {
+                    itemsHtml += `
+                <div class="array-item">
+                    <input type="number" value="${item.amount || ''}" data-idx="${idx}" class="array-input amount" placeholder="Сумма" />
+                    <input type="number" value="${item.discount || ''}" data-idx="${idx}" class="array-input discount" placeholder="Скидка (в %)" />
+                    <button class="remove-item" data-idx="${idx}">Удалить</button>
+                </div>
+            `;
+                } else {
+                    itemsHtml += `
+                <div class="array-item">
+                    <input type="text" value="${item.username || ''}" data-idx="${idx}" class="array-input operator-username" placeholder="Имя оператора" />
+                    <input type="text" value="${item.password || ''}" data-idx="${idx}" class="array-input operator-password" placeholder="Пароль" />
+                    <select data-idx="${idx}" class="array-input currency-select">
+                        <option value="BTC" ${item.currency === 'BTC' ? 'selected' : ''}>BTC</option>
+                        <option value="LTC" ${item.currency === 'LTC' ? 'selected' : ''}>LTC</option>
+                    </select>
+                    <button class="remove-item" data-idx="${idx}">Удалить</button>
+                </div>
+            `;
+                }
+            });
+
+            modal.innerHTML = `
+        <div class="modal-content">
+            <h3>Редактировать ${paramTranslations[key]}</h3>
+            ${singleOperatorModeHtml}
+            <div id="array-items">${itemsHtml}</div>
+            <div class="prizes-container">
+                <button type="button" id="addItem" class="add-button">Добавить</button>
+            </div>
+            <div class="modal-buttons">
+                <button id="cancel-array-btn">Отменить</button>
+                <button id="save-array-btn">Сохранить</button>
+            </div>
+        </div>
+    `;
+            document.body.appendChild(modal);
+
+            const addBtn = modal.querySelector('#addItem');
+            addBtn.onclick = () => {
+                const idx = currentValue.length + modal.querySelectorAll('.array-item').length;
+                const itemDiv = document.createElement('div');
+                itemDiv.className = 'array-item';
+                if (key === 'vipUsersData') {
+                    itemDiv.innerHTML = `
+                <input type="text" value="" data-idx="${idx}" class="array-input username" placeholder="Имя пользователя" />
+                <input type="number" value="" data-idx="${idx}" class="array-input discount" placeholder="Скидка (в %)" />
+                <button class="remove-item" data-idx="${idx}">Удалить</button>
+            `;
+                } else if (key === 'buyPaymentDetails') {
+                    itemDiv.innerHTML = `
+                <textarea data-idx="${idx}" class="array-input description" placeholder="Описание"></textarea>
+                <button class="remove-item" data-idx="${idx}">Удалить</button>
+            `;
+                } else if (key.includes('CommissionScalePercent')) {
+                    itemDiv.innerHTML = `
+                <input type="number" value="" data-idx="${idx}" class="array-input amount" placeholder="Сумма" />
+                <input type="number" value="" data-idx="${idx}" class="array-input commission" placeholder="Комиссия (в %)" />
+                <button class="remove-item" data-idx="${idx}">Удалить</button>
+            `;
+                } else if (key === 'commissionDiscounts') {
+                    itemDiv.innerHTML = `
+                <input type="number" value="" data-idx="${idx}" class="array-input amount" placeholder="Сумма" />
+                <input type="number" value="" data-idx="${idx}" class="array-input discount" placeholder="Скидка (в %)" />
+                <button class="remove-item" data-idx="${idx}">Удалить</button>
+            `;
+                } else {
+                    itemDiv.innerHTML = `
+                <input type="text" value="" data-idx="${idx}" class="array-input operator-username" placeholder="Имя оператора" />
+                <input type="text" value="" data-idx="${idx}" class="array-input operator-password" placeholder="Пароль" />
+                <select data-idx="${idx}" class="array-input currency-select">
+                    <option value="BTC">BTC</option>
+                    <option value="LTC">LTC</option>
+                </select>
+                <button class="remove-item" data-idx="${idx}">Удалить</button>
+            `;
+                }
+                modal.querySelector('#array-items').appendChild(itemDiv);
+                bindRemoveButtons(modal);
+            };
+
+            function bindRemoveButtons(modal) {
+                modal.querySelectorAll('.remove-item').forEach(btn => {
+                    btn.onclick = () => btn.parentElement.remove();
+                });
+            }
+
+            modal.querySelector('#cancel-array-btn').onclick = () => modal.remove();
+
+            modal.querySelector('#save-array-btn').onclick = async () => {
+                let newValue = [];
+                if (key === 'multipleOperatorsData' && !modal.querySelector('#singleOperatorToggle').checked) {
+                    const username = modal.querySelector('.array-input.operator-username')?.value;
+                    const password = modal.querySelector('.array-input.operator-password')?.value;
+                    const currency = modal.querySelector('.array-input.currency-select')?.value;
+                    if (username && password && currency) {
+                        newValue = [{username, password, currency}];
+                        config.singleOperatorUsername = username;
+                    }
+                    config.multipleOperatorsMode = false;
+                } else {
+                    modal.querySelectorAll('.array-item').forEach(item => {
+                        if (key === 'vipUsersData') {
+                            const username = item.querySelector('.username').value;
+                            const discount = parseFloat(item.querySelector('.discount').value);
+                            if (username && !isNaN(discount)) {
+                                newValue.push({username, discount});
+                            }
+                        } else if (key === 'buyPaymentDetails') {
+                            const description = item.querySelector('.description').value;
+                            if (description) {
+                                newValue.push({
+                                    id: item.querySelector('.description').dataset.idx < currentValue.length ?
+                                        currentValue[item.querySelector('.description').dataset.idx]?.id || String(Date.now()) :
+                                        String(Date.now()),
+                                    description,
+                                    timestamp: item.querySelector('.description').dataset.idx < currentValue.length ?
+                                        currentValue[item.querySelector('.description').dataset.idx]?.timestamp || new Date().toISOString() :
+                                        new Date().toISOString(),
+                                    confirmedUsages: item.querySelector('.description').dataset.idx < currentValue.length ?
+                                        currentValue[item.querySelector('.description').dataset.idx]?.confirmedUsages || 0 :
+                                        0
+                                });
+                            }
+                        } else if (key.includes('CommissionScalePercent')) {
+                            const amount = parseFloat(item.querySelector('.amount').value);
+                            const commission = parseFloat(item.querySelector('.commission').value);
+                            if (!isNaN(amount) && !isNaN(commission)) {
+                                newValue.push({amount, commission});
+                            }
+                        } else if (key === 'commissionDiscounts') {
+                            const amount = parseFloat(item.querySelector('.amount').value);
+                            const discount = parseFloat(item.querySelector('.discount').value);
+                            if (!isNaN(amount) && !isNaN(discount)) {
+                                newValue.push({amount, discount});
+                            }
+                        } else {
+                            const username = item.querySelector('.operator-username').value;
+                            const password = item.querySelector('.operator-password').value;
+                            const currency = item.querySelector('.currency-select').value;
+                            if (username && password && currency) {
+                                newValue.push({username, password, currency});
+                            }
+                        }
+                    });
+                    if (key === 'multipleOperatorsData') {
+                        config.multipleOperatorsMode = true;
+                    }
+                }
+
+                try {
+                    await api.put('/config', {...config, [key]: newValue});
+                    config[key] = newValue;
+                    if (key === 'multipleOperatorsData') {
+                        config.multipleOperatorsMode = modal.querySelector('#singleOperatorToggle').checked;
+                    }
+                    modal.remove();
+                    renderConfigTable();
+                } catch (err) {
+                    console.error('Error saving array:', err);
+                }
+            };
+
+            if (key === 'multipleOperatorsData') {
+                modal.querySelector('#singleOperatorToggle').addEventListener('change', (e) => {
+                    const itemsContainer = modal.querySelector('#array-items');
+                    itemsContainer.innerHTML = '';
+                    if (!e.target.checked) {
+                        itemsContainer.innerHTML = `
                     <div class="array-item">
                         <input type="text" value="${config.singleOperatorUsername || ''}" data-idx="0" class="array-input operator-username" placeholder="Имя оператора" />
-                    </div>
-                `;
-            } else {
-                itemsHtml = currentValue.length > 0 ? currentValue.map((item, idx) => `
-                    <div class="array-item">
-                        <input type="text" value="${item.username}" data-idx="${idx}" class="array-input operator-username" placeholder="Имя оператора" />
-                        <input type="text" value="${item.password || ''}" data-idx="${idx}" class="array-input operator-password" placeholder="Пароль" />
-                        <select data-idx="${idx}" class="array-input currency-select">
-                            <option value="BTC" ${item.currency === 'BTC' ? 'selected' : ''}>BTC</option>
-                            <option value="LTC" ${item.currency === 'LTC' ? 'selected' : ''}>LTC</option>
-                        </select>
-                        <button class="remove-item" data-idx="${idx}">Удалить</button>
-                    </div>
-                `).join('') : `
-                    <div class="array-item">
-                        <input type="text" value="" data-idx="0" class="array-input operator-username" placeholder="Имя оператора" />
                         <input type="text" value="" data-idx="0" class="array-input operator-password" placeholder="Пароль" />
                         <select data-idx="0" class="array-input currency-select">
                             <option value="BTC">BTC</option>
@@ -217,91 +401,12 @@ function initializeConfig() {
                         <button class="remove-item" data-idx="0">Удалить</button>
                     </div>
                 `;
-            }
-        } else if (key === 'vipUsersData') {
-            itemsHtml = currentValue.length > 0 ? currentValue.map((item, idx) => `
-                <div class="array-item">
-                    <input type="text" value="${item.username}" data-idx="${idx}" class="array-input vip-username" placeholder="Имя VIP-пользователя" />
-                    <input type="number" value="${item.discount || ''}" data-idx="${idx}" class="array-input discount" placeholder="Скидка (в %)" />
-                    <button class="remove-item" data-idx="${idx}">Удалить</button>
-                </div>
-            `).join('') : `
-                <div class="array-item">
-                    <input type="text" value="" data-idx="0" class="array-input vip-username" placeholder="Имя VIP-пользователя" />
-                    <input type="number" value="" data-idx="0" class="array-input discount" placeholder="Скидка (в %)" />
-                    <button class="remove-item" data-idx="0">Удалить</button>
-                </div>
-            `;
-        } else if (key === 'buyPaymentDetails') {
-            itemsHtml = currentValue.length > 0 ? currentValue.map((item, idx) => `
-                <div class="array-item">
-                    <input type="text" value="${item.description}" data-idx="${idx}" class="array-input description" placeholder="Описание" />
-                    <button class="remove-item" data-idx="${idx}">Удалить</button>
-                </div>
-            `).join('') : `
-                <div class="array-item">
-                    <input type="text" value="" data-idx="0" class="array-input description" placeholder="Описание" />
-                    <button class="remove-item" data-idx="0">Удалить</button>
-                </div>
-            `;
-        } else if (key === 'commissionDiscounts' ||
-            key === 'buyCommissionScalePercentBTC' ||
-            key === 'sellCommissionScalePercentBTC' ||
-            key === 'buyCommissionScalePercentLTC' ||
-            key === 'sellCommissionScalePercentLTC') {
-            itemsHtml = currentValue.length > 0 ? currentValue.map((item, idx) => `
-                <div class="array-item">
-                    <input type="number" value="${item.amount}" data-idx="${idx}" class="array-input amount" placeholder="Количество (в RUB)" />
-                    <input type="number" value="${item[key.includes('Commission') ? 'commission' : 'discount']}" data-idx="${idx}" class="array-input ${key.includes('Commission') ? 'commission' : 'discount'}" placeholder="${key.includes('Commission') ? 'Комиссия (в %)' : 'Скидка (в %)'}"/>
-                    <button class="remove-item" data-idx="${idx}">Удалить</button>
-                </div>
-            `).join('') : `
-                <div class="array-item">
-                    <input type="number" value="" data-idx="0" class="array-input amount" placeholder="Количество (в RUB)" />
-                    <input type="number" value="" data-idx="0" class="array-input ${key.includes('Commission') ? 'commission' : 'discount'}" placeholder="${key.includes('Commission') ? 'Комиссия (в %)' : 'Скидка (в %)'}"/>
-                    <button class="remove-item" data-idx="0">Удалить</button>
-                </div>
-            `;
-        }
-
-        modal.innerHTML = `
-            <div class="modal-content">
-                <h3>Редактировать ${paramTranslations[key]}</h3>
-                ${key === 'multipleOperatorsData' ? singleOperatorModeHtml : ''}
-                <div id="array-items">
-                    ${itemsHtml}
-                </div>
-                <div class="modal-actions">
-                    ${key === 'multipleOperatorsData' && !config.multipleOperatorsMode ? '' : '<button id="add-item">Добавить</button>'}
-                </div>
-                <div class="modal-buttons">
-                    <button id="save-array-btn">Сохранить</button>
-                    <button id="cancel-array-btn">Отменить</button>
-                </div>
-            </div>
-        `;
-        document.body.appendChild(modal);
-
-        if (key === 'multipleOperatorsData') {
-            const singleOperatorToggle = modal.querySelector('#singleOperatorToggle');
-            const itemsDiv = modal.querySelector('#array-items');
-            const addItemBtn = modal.querySelector('#add-item');
-
-            const updateSingleOperatorMode = () => {
-                const isMultipleOperator = singleOperatorToggle.checked;
-                itemsDiv.innerHTML = '';
-                if (!isMultipleOperator) {
-                    itemsDiv.innerHTML = `
+                    } else {
+                        itemsHtml = '';
+                        (config[key] || []).forEach((item, idx) => {
+                            itemsHtml += `
                         <div class="array-item">
-                            <input type="text" value="${config.singleOperatorUsername || ''}" data-idx="0" class="array-input operator-username" placeholder="Имя оператора" />
-                        </div>
-                    `;
-                    if (addItemBtn) addItemBtn.style.display = 'none';
-                } else {
-                    const items = config.multipleOperatorsData || [];
-                    itemsDiv.innerHTML = items.length > 0 ? items.map((item, idx) => `
-                        <div class="array-item">
-                            <input type="text" value="${item.username}" data-idx="${idx}" class="array-input operator-username" placeholder="Имя оператора" />
+                            <input type="text" value="${item.username || ''}" data-idx="${idx}" class="array-input operator-username" placeholder="Имя оператора" />
                             <input type="text" value="${item.password || ''}" data-idx="${idx}" class="array-input operator-password" placeholder="Пароль" />
                             <select data-idx="${idx}" class="array-input currency-select">
                                 <option value="BTC" ${item.currency === 'BTC' ? 'selected' : ''}>BTC</option>
@@ -309,206 +414,66 @@ function initializeConfig() {
                             </select>
                             <button class="remove-item" data-idx="${idx}">Удалить</button>
                         </div>
-                    `).join('') : `
-                        <div class="array-item">
-                            <input type="text" value="" data-idx="0" class="array-input operator-username" placeholder="Имя оператора" />
-                            <input type="text" value="" data-idx="0" class="array-input operator-password" placeholder="Пароль" />
-                            <select data-idx="0" class="array-input currency-select">
-                                <option value="BTC">BTC</option>
-                                <option value="LTC">LTC</option>
-                            </select>
-                            <button class="remove-item" data-idx="0">Удалить</button>
-                        </div>
                     `;
-                    if (addItemBtn) addItemBtn.style.display = 'block';
-                }
-                bindRemoveButtons(modal);
-            };
-
-            singleOperatorToggle.addEventListener('change', () => {
-                updateSingleOperatorMode();
-            });
-            updateSingleOperatorMode();
-        }
-
-        const addItemButton = modal.querySelector('#add-item');
-        if (addItemButton) {
-            addItemButton.onclick = () => {
-                const itemsDiv = modal.querySelector('#array-items');
-                const idx = itemsDiv.children.length;
-                const itemDiv = document.createElement('div');
-                itemDiv.className = 'array-item';
-                if (key === 'vipUsersData') {
-                    itemDiv.innerHTML = `
-                    <input type="text" value="" data-idx="${idx}" class="array-input vip-username" placeholder="Имя VIP-пользователя" />
-                    <input type="number" value="" data-idx="${idx}" class="array-input discount" placeholder="Скидка (в %)" />
-                    <button class="remove-item" data-idx="${idx}">Удалить</button>
-                `;
-                } else if (key === 'buyPaymentDetails') {
-                    itemDiv.innerHTML = `
-                    <input type="text" value="" data-idx="${idx}" class="array-input description" placeholder="Описание" />
-                    <button class="remove-item" data-idx="${idx}">Удалить</button>
-                `;
-                } else if (key === 'commissionDiscounts' ||
-                    key === 'buyCommissionScalePercentBTC' ||
-                    key === 'sellCommissionScalePercentBTC' ||
-                    key === 'buyCommissionScalePercentLTC' ||
-                    key === 'sellCommissionScalePercentLTC') {
-                    itemDiv.innerHTML = `
-                    <input type="number" value="" data-idx="${idx}" class="array-input amount" placeholder="Количество (в RUB)" />
-                    <input type="number" value="" data-idx="${idx}" class="array-input ${key.includes('Commission') ? 'commission' : 'discount'}" placeholder="${key.includes('Commission') ? 'Комиссия (в %)' : 'Скидка (в %)'}"/>
-                    <button class="remove-item" data-idx="${idx}">Удалить</button>
-                `;
-                } else if (key === 'multipleOperatorsData') {
-                    itemDiv.innerHTML = `
-                    <input type="text" value="" data-idx="${idx}" class="array-input operator-username" placeholder="Имя оператора" />
-                    <input type="text" value="" data-idx="${idx}" class="array-input operator-password" placeholder="Пароль" />
-                    <select data-idx="${idx}" class="array-input currency-select">
-                        <option value="BTC">BTC</option>
-                        <option value="LTC">LTC</option>
-                    </select>
-                    <button class="remove-item" data-idx="${idx}">Удалить</button>
-                `;
-                }
-                itemsDiv.appendChild(itemDiv);
-                bindRemoveButtons(modal);
-            };
-        }
-
-        modal.querySelector('#save-array-btn').onclick = async () => {
-            const itemsDiv = modal.querySelector('#array-items');
-            const singleOperatorToggle = modal.querySelector('#singleOperatorToggle');
-            const updatedConfig = { ...config };
-
-            if (key === 'multipleOperatorsData') {
-                const isMultipleOperator = singleOperatorToggle ? singleOperatorToggle.checked : config.multipleOperatorsMode;
-                updatedConfig.multipleOperatorsMode = isMultipleOperator;
-                if (!isMultipleOperator) {
-                    const username = itemsDiv.querySelector('.array-input.operator-username')?.value.trim();
-                    if (username) {
-                        updatedConfig.singleOperatorUsername = username;
-                        updatedConfig.multipleOperatorsData = [];
-                    } else {
-                        console.error('No operator username provided in single operator mode');
-                        return;
+                        });
+                        itemsContainer.innerHTML = itemsHtml;
                     }
-                } else {
-                    const items = Array.from(itemsDiv.children).map(item => {
-                        const username = item.querySelector('.operator-username').value.trim();
-                        const password = item.querySelector('.operator-password')?.value.trim() || '';
-                        const currency = item.querySelector('.currency-select')?.value || 'BTC';
-                        return { username, password, currency };
-                    });
-                    updatedConfig.multipleOperatorsData = items.filter(item => item.username);
-                }
-            } else if (key === 'vipUsersData') {
-                const items = Array.from(itemsDiv.children).map(item => {
-                    const username = item.querySelector('.vip-username').value.trim();
-                    const discount = parseFloat(item.querySelector('.discount').value);
-                    return { username, discount: isNaN(discount) ? 0 : discount };
+                    bindRemoveButtons(modal);
                 });
-                updatedConfig.vipUsersData = items.filter(item => item.username);
-            } else if (key === 'buyPaymentDetails') {
-                const items = Array.from(itemsDiv.children).map(item => {
-                    const description = item.querySelector('.description').value.trim();
-                    const timestamp = new Date().toISOString();
-                    return { description, timestamp };
-                });
-                updatedConfig.buyPaymentDetails = items.filter(item => item.description);
-            } else if (key === 'commissionDiscounts' ||
-                key === 'buyCommissionScalePercentBTC' ||
-                key === 'sellCommissionScalePercentBTC' ||
-                key === 'buyCommissionScalePercentLTC' ||
-                key === 'sellCommissionScalePercentLTC') {
-                const items = Array.from(itemsDiv.children).map(item => {
-                    const amount = parseFloat(item.querySelector('.amount').value);
-                    const value = parseFloat(item.querySelector(key.includes('Commission') ? '.commission' : '.discount').value);
-                    return {
-                        amount: isNaN(amount) ? 0 : amount,
-                        [key.includes('Commission') ? 'commission' : 'discount']: isNaN(value) ? 0 : value
-                    };
-                });
-                updatedConfig[key] = items.filter(item => item.amount && (item[key.includes('Commission') ? 'commission' : 'discount']));
             }
 
-            try {
-                await api.put('/config', updatedConfig);
-                config = updatedConfig;
-                await api.get('/config').then(r => {
-                    config = r.data;
-                    renderConfigTable();
-                });
-                modal.remove();
-            } catch (err) {
-                console.error('Error updating config:', err.message);
+            bindRemoveButtons(modal);
+        }
+
+        function renderConfigTable() {
+            const list = filterConfig();
+            const total = list.length;
+            const start = (page - 1) * perPage;
+            const slice = list.slice(start, start + perPage);
+
+            tbody.innerHTML = '';
+            if (total === 0) {
+                tbody.innerHTML = '<tr><td colspan="2">На данный момент информация отсутствует</td></tr>';
+                return;
             }
-        };
 
-        modal.querySelector('#cancel-array-btn').onclick = () => modal.remove();
-
-        function bindRemoveButtons(modal) {
-            modal.querySelectorAll('.remove-item').forEach(btn => {
-                btn.onclick = () => {
-                    btn.parentElement.remove();
-                    if ((key === 'multipleOperatorsData' && modal.querySelector('#singleOperatorToggle')?.checked) || key === 'vipUsersData' || key === 'buyPaymentDetails') {
-                        if (modal.querySelectorAll('.array-item').length === 0) {
-                            const idx = 0;
-                            const itemDiv = document.createElement('div');
-                            itemDiv.className = 'array-item';
-                            if (key === 'vipUsersData') {
-                                itemDiv.innerHTML = `
-                                    <input type="text" value="" data-idx="${idx}" class="array-input vip-username" placeholder="Имя VIP-пользователя" />
-                                    <input type="number" value="" data-idx="${idx}" class="array-input discount" placeholder="Скидка (в %)" />
-                                    <button class="remove-item" data-idx="${idx}">Удалить</button>
-                                `;
-                            } else if (key === 'buyPaymentDetails') {
-                                itemDiv.innerHTML = `
-                                    <input type="text" value="" data-idx="${idx}" class="array-input description" placeholder="Описание" />
-                                    <button class="remove-item" data-idx="${idx}">Удалить</button>
-                                `;
-                            } else {
-                                itemDiv.innerHTML = `
-                                    <input type="text" value="" data-idx="${idx}" class="array-input operator-username" placeholder="Имя оператора" />
-                                    <input type="text" value="" data-idx="${idx}" class="array-input operator-password" placeholder="Пароль" />
-                                    <select data-idx="${idx}" class="array-input currency-select">
-                                        <option value="BTC">BTC</option>
-                                        <option value="LTC">LTC</option>
-                                    </select>
-                                    <button class="remove-item" data-idx="${idx}">Удалить</button>
-                                `;
+            slice.forEach(([key, value]) => {
+                const tr = document.createElement('tr');
+                let displayValue;
+                if (Array.isArray(value)) {
+                    if (key === 'multipleOperatorsData') {
+                        if (config.multipleOperatorsMode === false) {
+                            displayValue = config.singleOperatorUsername || '-';
+                        } else {
+                            const formattedItems = value.map(item => `${item.username} (${item.currency})`);
+                            displayValue = '';
+                            for (let i = 0; i < formattedItems.length; i += 2) {
+                                const pair = [formattedItems[i]];
+                                if (i + 1 < formattedItems.length) pair.push(formattedItems[i + 1]);
+                                displayValue += pair.join(' | ');
+                                if (i + 2 < formattedItems.length) displayValue += '<br>';
                             }
-                            modal.querySelector('#array-items').appendChild(itemDiv);
-                            bindRemoveButtons(modal);
+                            displayValue = displayValue || '-';
                         }
-                    }
-                };
-            });
-        }
-
-        bindRemoveButtons(modal);
-    }
-
-    function renderConfigTable() {
-        const list = filterConfig();
-        const total = list.length;
-        const start = (page - 1) * perPage;
-        const slice = list.slice(start, start + perPage);
-
-        tbody.innerHTML = '';
-        if (total === 0) {
-            tbody.innerHTML = '<tr><td colspan="2">На данный момент информация отсутствует</td></tr>';
-            return;
-        }
-
-        slice.forEach(([key, value]) => {
-            const tr = document.createElement('tr');
-            let displayValue;
-            if (Array.isArray(value)) {
-                if (key === 'multipleOperatorsData') {
-                    if (config.multipleOperatorsMode === false) {
-                        displayValue = config.singleOperatorUsername || '-';
-                    } else {
-                        const formattedItems = value.map(item => `${item.username} (${item.currency})`);
+                    } else if (key === 'vipUsersData') {
+                        const formattedItems = value.map(item => `${item.username}: ${item.discount}`);
+                        displayValue = '';
+                        for (let i = 0; i < formattedItems.length; i += 2) {
+                            const pair = [formattedItems[i]];
+                            if (i + 1 < formattedItems.length) pair.push(formattedItems[i + 1]);
+                            displayValue += pair.join(' | ');
+                            if (i + 2 < formattedItems.length) displayValue += '<br>';
+                        }
+                        displayValue = displayValue || '-';
+                    } else if (key === 'buyPaymentDetails') {
+                        const formattedItems = value.map(item => item.description);
+                        displayValue = formattedItems.length > 0 ? formattedItems.join('<br>') : '-';
+                    } else if (key === 'commissionDiscounts' ||
+                        key === 'buyCommissionScalePercentBTC' ||
+                        key === 'sellCommissionScalePercentBTC' ||
+                        key === 'buyCommissionScalePercentLTC' ||
+                        key === 'sellCommissionScalePercentLTC') {
+                        const formattedItems = value.map(item => `${item.amount}: ${item[key.includes('Commission') ? 'commission' : 'discount']}`);
                         displayValue = '';
                         for (let i = 0; i < formattedItems.length; i += 2) {
                             const pair = [formattedItems[i]];
@@ -518,84 +483,60 @@ function initializeConfig() {
                         }
                         displayValue = displayValue || '-';
                     }
-                } else if (key === 'vipUsersData') {
-                    const formattedItems = value.map(item => `${item.username}: ${item.discount}`);
-                    displayValue = '';
-                    for (let i = 0; i < formattedItems.length; i += 2) {
-                        const pair = [formattedItems[i]];
-                        if (i + 1 < formattedItems.length) pair.push(formattedItems[i + 1]);
-                        displayValue += pair.join(' | ');
-                        if (i + 2 < formattedItems.length) displayValue += '<br>';
-                    }
-                    displayValue = displayValue || '-';
-                } else if (key === 'buyPaymentDetails') {
-                    const formattedItems = value.map(item => `${item.description}`);
-                    displayValue = '';
-                    for (let i = 0; i < formattedItems.length; i += 2) {
-                        const pair = [formattedItems[i]];
-                        if (i + 1 < formattedItems.length) pair.push(formattedItems[i + 1]);
-                        displayValue += pair.join(' | ');
-                        if (i + 2 < formattedItems.length) displayValue += '<br>';
-                    }
-                    displayValue = displayValue || '-';
-                } else if (key === 'commissionDiscounts' ||
-                    key === 'buyCommissionScalePercentBTC' ||
-                    key === 'sellCommissionScalePercentBTC' ||
-                    key === 'buyCommissionScalePercentLTC' ||
-                    key === 'sellCommissionScalePercentLTC') {
-                    const formattedItems = value.map(item => `${item.amount}: ${item[key.includes('Commission') ? 'commission' : 'discount']}`);
-                    displayValue = '';
-                    for (let i = 0; i < formattedItems.length; i += 2) {
-                        const pair = [formattedItems[i]];
-                        if (i + 1 < formattedItems.length) pair.push(formattedItems[i + 1]);
-                        displayValue += pair.join(' | ');
-                        if (i + 2 < formattedItems.length) displayValue += '<br>';
-                    }
-                    displayValue = displayValue || '-';
+                } else {
+                    displayValue = value === null || value === undefined ? '-' : value;
                 }
-            } else {
-                displayValue = value === null || value === undefined ? '-' : value;
-            }
-            tr.innerHTML = `
-                <td>${paramTranslations[key]}</td>
-                <td class="${arrayKeys.includes(key) ? 'array-cell' : ''}">
-                    ${arrayKeys.includes(key) ? `
+                let inputHtml;
+                if (arrayKeys.includes(key)) {
+                    inputHtml = `
                         <span class="array-display">${displayValue}</span>
                         <button class="edit-array-btn" data-key="${key}">Редактировать</button>
-                    ` : `
+                    `;
+                } else if (key === 'sellWalletBTC' || key === 'sellWalletLTC') {
+                    inputHtml = `
+                        <textarea data-key="${key}" class="config-input">${value === null || value === undefined ? '' : value}</textarea>
+                    `;
+                } else {
+                    inputHtml = `
                         <input type="text" value="${value === null || value === undefined ? '' : value}" data-key="${key}" class="config-input" />
-                    `}
+                    `;
+                }
+                tr.innerHTML = `
+                <td>${paramTranslations[key]}</td>
+                <td class="${arrayKeys.includes(key) ? 'array-cell' : ''}">
+                    ${inputHtml}
                 </td>
             `;
-            tbody.appendChild(tr);
-        });
+                tbody.appendChild(tr);
+            });
 
-        pageInfo.textContent = `Страница ${page} из ${Math.ceil(total / perPage) || 1}`;
-        prevBtn.disabled = page === 1;
-        nextBtn.disabled = page >= Math.ceil(total / perPage);
+            pageInfo.textContent = `Страница ${page} из ${Math.ceil(total / perPage) || 1}`;
+            prevBtn.disabled = page === 1;
+            nextBtn.disabled = page >= Math.ceil(total / perPage);
 
-        document.querySelectorAll('.edit-array-btn').forEach(btn => {
-            btn.onclick = () => openArrayEditor(btn.dataset.key);
-        });
+            document.querySelectorAll('.edit-array-btn').forEach(btn => {
+                btn.onclick = () => openArrayEditor(btn.dataset.key);
+            });
 
-        document.querySelectorAll('.config-input').forEach(input => {
-            input.onblur = () => {
-                const key = input.dataset.key;
-                const newValue = input.value;
-                let parsedValue;
-                if (!isNaN(newValue)) {
-                    parsedValue = parseFloat(newValue);
-                } else {
-                    parsedValue = newValue;
-                }
-                const updatedConfig = { ...config, [key]: parsedValue };
-                api.put('/config', updatedConfig).then(() => {
-                    config = updatedConfig;
-                    renderConfigTable();
-                }).catch(err => console.error('Error updating config:', err.message));
-            };
-        });
-    }
+            document.querySelectorAll('.config-input').forEach(input => {
+                input.onblur = () => {
+                    const key = input.dataset.key;
+                    const newValue = input.value;
+                    let parsedValue;
+                    if (!isNaN(newValue)) {
+                        parsedValue = parseFloat(newValue);
+                    } else {
+                        parsedValue = newValue;
+                    }
+                    const updatedConfig = {...config, [key]: parsedValue};
+                    api.put('/config', updatedConfig).then(() => {
+                        config = updatedConfig;
+                        renderConfigTable();
+                    }).catch(err => console.error('Error updating config:', err.message));
+                };
+            });
+        }
+    });
 }
 
 initializeConfig();

@@ -37,6 +37,75 @@ function initializeBroadcasts() {
             });
         }
 
+        function openEditModal(broadcast) {
+            const modal = document.createElement('div');
+            modal.className = 'modal';
+            const scheduledTime = broadcast.scheduledTime ? new Date(broadcast.scheduledTime).toISOString().slice(0, 16) : '';
+            modal.innerHTML = `
+                <div class="modal-content">
+                    <h3>Редактировать рассылку</h3>
+                    <div class="form-group">
+                        <label for="editContent">Текст рассылки:</label>
+                        <textarea id="editContent" required>${broadcast.text}</textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="editImage">Фото:</label>
+                        <input type="file" id="editImage" accept="image/*">
+                        <p>Текущее: ${broadcast.imageName || 'Нет'}</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="editScheduledTime">Запланированное время:</label>
+                        <input type="datetime-local" id="editScheduledTime" value="${scheduledTime}">
+                    </div>
+                    <div class="form-group">
+                        <div class="toggle-container">
+                            <label class="switch">
+                                <input type="checkbox" id="editIsDaily" ${broadcast.isDaily ? 'checked' : ''} />
+                                <span class="slider round"></span>
+                            </label>
+                            <span class="toggle-label">Ежедневная рассылка</span>
+                        </div>
+                    </div>
+                    <div class="modal-buttons">
+                        <button id="cancel-broadcast-btn">Отменить</button>
+                        <button id="save-broadcast-btn">Сохранить</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+
+            modal.querySelector('#cancel-broadcast-btn').onclick = () => modal.remove();
+
+            modal.querySelector('#save-broadcast-btn').onclick = async () => {
+                const content = modal.querySelector('#editContent').value;
+                const scheduledTimeInput = modal.querySelector('#editScheduledTime').value;
+                const isDaily = modal.querySelector('#editIsDaily').checked;
+                const imageInput = modal.querySelector('#editImage');
+
+                if (!content) {
+                    return;
+                }
+
+                const formData = new FormData();
+                formData.append('content', content);
+                formData.append('scheduledTime', scheduledTimeInput ? new Date(scheduledTimeInput).toISOString() : '');
+                formData.append('isDaily', isDaily.toString());
+                if (imageInput.files[0]) {
+                    formData.append('image', imageInput.files[0]);
+                }
+
+                try {
+                    await api.put(`/broadcasts/${broadcast.id}`, formData, {
+                        headers: { 'Content-Type': 'multipart/form-data' }
+                    });
+                    modal.remove();
+                    loadBroadcasts();
+                } catch (err) {
+                    console.error('Error updating broadcast:', err);
+                }
+            };
+        }
+
         searchInput.addEventListener('input', () => {
             page = 1;
             renderBroadcastsTable();
@@ -84,7 +153,10 @@ function initializeBroadcasts() {
                     <td>${b.imageName || 'Нет'}</td>
                     <td>${formatDateTime(b.scheduledTime)}</td>
                     <td>${b.isDaily ? 'Да' : 'Нет'}</td>
-                    <td><button class="delete-with-broadcasts" data-id="${b.id}">Удалить</button></td>
+                    <td>
+                        <button class="edit-broadcast" data-id="${b.id}">Редактировать</button>
+                        <button class="delete-with-broadcasts" data-id="${b.id}">Удалить</button>
+                    </td>
                 `;
                 tbody.appendChild(tr);
             });
@@ -92,6 +164,15 @@ function initializeBroadcasts() {
             pageInfo.textContent = `Страница ${page} из ${Math.ceil(total / perPage) || 1}`;
             prevBtn.disabled = page === 1;
             nextBtn.disabled = page >= Math.ceil(total / perPage);
+
+            document.querySelectorAll('.edit-broadcast').forEach(b => {
+                b.onclick = () => {
+                    const broadcast = broadcasts.find(item => item.id === b.dataset.id);
+                    if (broadcast) {
+                        openEditModal(broadcast);
+                    }
+                };
+            });
 
             document.querySelectorAll('.delete-with-broadcasts').forEach(b => {
                 b.onclick = () => {
@@ -121,23 +202,15 @@ function initializeBroadcasts() {
                 const isDaily = document.getElementById('isDaily').checked;
                 const imageInput = document.getElementById('image');
 
-                let scheduledTime = null;
-                if (scheduledTimeInput) {
-                    const [date, time] = scheduledTimeInput.split(' ');
-                    const [day, month, year] = date.split('.');
-                    const [hours, minutes] = time.split(':');
-                    const dt = new Date(year, month - 1, day, hours, minutes);
-                    if (isNaN(dt.getTime())) {
-                        formError.textContent = 'Неверный формат даты (ДД.ММ.ГГГГ чч:мм)';
-                        formError.style.display = 'block';
-                        return;
-                    }
-                    scheduledTime = dt.toISOString();
+                if (!content) {
+                    formError.textContent = 'Текст рассылки обязателен';
+                    formError.style.display = 'block';
+                    return;
                 }
 
                 const formData = new FormData();
                 formData.append('content', content);
-                formData.append('scheduledTime', scheduledTime || '');
+                formData.append('scheduledTime', scheduledTimeInput ? new Date(scheduledTimeInput).toISOString() : '');
                 formData.append('isDaily', isDaily);
                 if (imageInput.files[0]) {
                     formData.append('image', imageInput.files[0]);

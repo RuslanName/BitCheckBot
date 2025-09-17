@@ -39,7 +39,7 @@ function checkAuth(callback) {
                 callback(userRole, userCurrency);
             })
             .catch(err => {
-                console.error('Ошибка получения данных пользователя:', err);
+                console.error('Error retrieving user data:', err);
                 localStorage.removeItem('token');
                 window.location.href = '/login';
             });

@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Розыгрыши</title>
+    <link rel="stylesheet" href="/css/styles.css">
+    <link rel="icon" type="image/x-icon" href="https://cdn3.iconfinder.com/data/icons/human-resource-management-set-2/64/2-08-1024.png">
+</head>
+<body>
+<div class="container">
+    <nav id="sidebar">
+        <a href="/">Настройки</a>
+        <a href="/users">Пользователи</a>
+        <a href="/deals">Сделки</a>
+        <a href="/withdrawals">Вывод рефералов</a>
+        <a href="/raffles" class="active">Розыгрыши</a>
+        <a href="/broadcasts">Рассылка</a>
+        <a href="/analytics">Аналитика</a>
+        <a href="#" id="logoutBtn">Выйти</a>
+    </nav>
+    <main>
+        <section class="form-container">
+            <h2>Создать розыгрыш</h2>
+            <form id="form">
+                <div class="form-group-horizontal">
+                    <div class="form-subgroup">
+                        <label for="startDate">Дата и время начала:</label>
+                        <input type="datetime-local" id="startDate" required>
+                    </div>
+                    <div class="form-subgroup">
+                        <label for="endDate">Дата и время окончания:</label>
+                        <input type="datetime-local" id="endDate" required>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="conditionType">Условие:</label>
+                    <select id="conditionType">
+                        <option value="" disabled selected>Выберите условие</option>
+                        <option value="dealCount">Количество завершённых сделок</option>
+                        <option value="dealSum">Сумма завершённых сделок</option>
+                    </select>
+                </div>
+                <div id="conditionFields" class="form-group" style="display: none;">
+                    <div class="condition-container">
+                        <div id="dealCountField" style="display: none;">
+                            <label for="dealCount">Количество сделок:</label>
+                            <input type="number" id="dealCount">
+                        </div>
+                        <div id="dealSumField" style="display: none;">
+                            <label for="dealSum">Сумма сделок (RUB):</label>
+                            <input type="number" id="dealSum">
+                        </div>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Призы:</label>
+                    <div id="prizesContainer" class="prizes-container">
+                        <div class="array-item prize-item">
+                            <input type="text" placeholder="Приз для 1 места" required>
+                            <button type="button" class="remove-prize">Удалить</button>
+                        </div>
+                        <button type="button" id="addPrize" class="add-button">Добавить</button>
+                    </div>
+                </div>
+                <button type="submit" class="submit-button">Создать</button>
+                <p id="formError" class="error" style="display: none;"></p>
+            </form>
+        </section>
+        <section>
+            <div class="controls">
+                <input type="text" id="searchId" placeholder="Поиск по ID">
+                <select id="perPage">
+                    <option value="25">25</option>
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                </select>
+            </div>
+            <table id="rafflesTable">
+                <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Период</th>
+                    <th>Условие</th>
+                    <th>Призы</th>
+                    <th>Действия</th>
+                </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+            <div class="pagination">
+                <button id="prevPage" disabled>< Назад</button>
+                <span id="pageInfo"></span>
+                <button id="nextPage" disabled>Вперед ></button>
+            </div>
+        </section>
+    </main>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+<script type="module" src="/js/raffles.js"></script>
+</body>
+</html>

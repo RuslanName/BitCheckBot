@@ -23,18 +23,6 @@ module.exports = {
       out_file: './logs/spam_bot.log',
       error_file: './logs/spam_bot_error.log',
       log_date_format: 'YYYY-MM-DD HH:mm:ss',
-    },
-    {
-      name: 'server',
-      script: './server.js',
-      instances: 1,
-      exec_mode: 'fork',
-      watch: false,
-      restart_delay: 1000,
-      max_memory_restart: '250M',
-      out_file: './logs/server.log',
-      error_file: './logs/server_error.log',
-      log_date_format: 'YYYY-MM-DD HH:mm:ss',
-    },
+    }
   ],
 };

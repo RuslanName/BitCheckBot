@@ -21,8 +21,9 @@ const TELEGRAM_API = `https://api.telegram.org/bot${process.env.MAIN_BOT_TOKEN}`
 const JWT_SECRET = process.env.JWT_SECRET;
 
 const broadcastEmitter = new EventEmitter();
+const raffleEmitter = new EventEmitter();
 
-module.exports = { broadcastEmitter };
+module.exports = { broadcastEmitter, raffleEmitter };
 
 function getBotStatus() {
     const config = loadJson('config');
@@ -37,7 +38,7 @@ function setBotStatus(status) {
 
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
-        const dir = path.join(process.env.DATA_PATH, 'images/broadcasts-images');
+        const dir = path.join(process.env.DATA_PATH, 'images/broadcasts');
         fs.ensureDirSync(dir);
         cb(null, dir);
     },
@@ -282,16 +283,13 @@ apiRouter.get('/deals', authenticateToken, async (req, res) => {
         if (!Array.isArray(data)) {
             data = Object.values(data);
         }
-        const { search, showCompleted } = req.query;
+        const { search } = req.query;
         const term = search ? search.trim().toLowerCase() : '';
-        const showCompletedBool = showCompleted === 'true';
 
         const users = loadJson('users');
 
         data = data.filter(d => {
             if (!d || d.status === 'draft') return false;
-            if (showCompletedBool && d.status !== 'completed') return false;
-            if (!showCompletedBool && d.status === 'completed') return false;
             const user = users.find(u => u.id === d.userId) || {};
             return (
                 (d.id && d.id.toString().includes(term)) ||
@@ -448,12 +446,48 @@ apiRouter.post('/broadcasts', authenticateToken, restrictTo('mainAdmin'), upload
     }
 });
 
+apiRouter.put('/broadcasts/:id', authenticateToken, restrictTo('mainAdmin'), upload.single('image'), (req, res) => {
+    try {
+        let list = loadJson('broadcasts');
+        const idx = list.findIndex(b => b.id === req.params.id);
+        if (idx === -1) {
+            return res.sendStatus(404);
+        }
+
+        const existingBroadcast = list[idx];
+        const imagePath = existingBroadcast.imageName ? path.join(process.env.DATA_PATH, 'images/broadcasts', existingBroadcast.imageName) : null;
+        if (req.file && imagePath && fs.existsSync(imagePath)) {
+            fs.removeSync(imagePath);
+        }
+
+        list[idx] = {
+            ...existingBroadcast,
+            text: req.body.content || existingBroadcast.text,
+            imageName: req.file ? req.file.filename : existingBroadcast.imageName,
+            scheduledTime: req.body.scheduledTime || existingBroadcast.scheduledTime,
+            timestamp: new Date().toISOString(),
+            isDaily: req.body.isDaily === 'true'
+        };
+
+        if (!list[idx].isDaily) {
+            list[idx].status = 'pending';
+        }
+
+        saveJson('broadcasts', list);
+        broadcastEmitter.emit('updateBroadcast');
+        res.json(list[idx]);
+    } catch (err) {
+        console.error('Error updating broadcast:', err.message);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
 apiRouter.delete('/broadcasts/:id', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
     try {
         let list = loadJson('broadcasts');
         const broadcast = list.find(x => x.id === req.params.id);
         if (broadcast && broadcast.imageName) {
-            const imagePath = path.join(process.env.DATA_PATH, 'images/broadcasts-images', broadcast.imageName);
+            const imagePath = path.join(process.env.DATA_PATH, 'images/broadcasts', broadcast.imageName);
             fs.removeSync(imagePath);
         }
         list = list.filter(x => x.id !== req.params.id);
@@ -465,6 +499,93 @@ apiRouter.delete('/broadcasts/:id', authenticateToken, restrictTo('mainAdmin'), 
     }
 });
 
+apiRouter.get('/raffles', authenticateToken, restrictTo('mainAdmin'), async (req, res) => {
+    try {
+        let data = loadJson('raffles');
+        if (!Array.isArray(data)) {
+            data = Object.values(data);
+        }
+
+        const { search } = req.query;
+        const term = search ? search.trim().toLowerCase() : '';
+
+        data = data.filter(r => {
+            if (!r || r.status === 'draft') return false;
+            return r.id.toString().includes(term);
+        });
+
+        res.json(data);
+    } catch (err) {
+        console.error('Error fetching raffles:', err.message);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+apiRouter.post('/raffles', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
+    try {
+        const list = loadJson('raffles') || [];
+        const item = {
+            id: Date.now().toString(),
+            startDate: req.body.startDate,
+            endDate: req.body.endDate,
+            condition: {
+                type: req.body.conditionType,
+                value: req.body.conditionType === 'dealCount' ? req.body.dealCount : req.body.dealSum
+            },
+            prizes: req.body.prizes || [],
+            timestamp: new Date().toISOString(),
+            status: 'pending'
+        };
+        list.push(item);
+        saveJson('raffles', list);
+        raffleEmitter.emit('newRaffle');
+        res.status(201).json(item);
+    } catch (err) {
+        console.error('Error creating raffle:', err.message);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+apiRouter.put('/raffles/:id', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
+    try {
+        let list = loadJson('raffles');
+        const idx = list.findIndex(r => r.id === req.params.id);
+        if (idx === -1) {
+            return res.sendStatus(404);
+        }
+        list[idx] = {
+            ...list[idx],
+            startDate: req.body.startDate,
+            endDate: req.body.endDate,
+            condition: {
+                type: req.body.conditionType,
+                value: req.body.conditionType === 'dealCount' ? req.body.dealCount : req.body.dealSum
+            },
+            prizes: req.body.prizes || [],
+            timestamp: new Date().toISOString(),
+            status: 'pending'
+        };
+        saveJson('raffles', list);
+        raffleEmitter.emit('updateRaffle');
+        res.json(list[idx]);
+    } catch (err) {
+        console.error('Error updating raffle:', err.message);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+apiRouter.delete('/raffles/:id', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
+    try {
+        let list = loadJson('raffles');
+        list = list.filter(x => x.id !== req.params.id);
+        saveJson('raffles', list);
+        res.sendStatus(204);
+    } catch (err) {
+        console.error('Error deleting raffle:', err.message);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
 apiRouter.get('/withdrawals', authenticateToken, restrictTo('mainAdmin'), async (req, res) => {
     try {
         let data = loadJson('withdrawals');
@@ -472,20 +593,17 @@ apiRouter.get('/withdrawals', authenticateToken, restrictTo('mainAdmin'), async 
             data = Object.values(data);
         }
 
-        const { term = '', showCompleted = 'false' } = req.query;
-        const searchTerm = term.trim().toLowerCase();
-        const showCompletedBool = showCompleted === 'true';
+        const { search } = req.query;
+        const term = search ? search.trim().toLowerCase() : '';
 
         const users = loadJson('users');
         data = data.filter(w => {
             if (!w || w.status === 'draft') return false;
-            if (showCompletedBool && w.status !== 'completed') return false;
-            if (!showCompletedBool && w.status === 'completed') return false;
             const user = users.find(u => u.id === w.userId) || {};
             return (
-                (w.id && w.id.toString().includes(searchTerm)) ||
-                (w.userId && w.userId.toString().includes(searchTerm)) ||
-                (user.username && user.username.toLowerCase().includes(searchTerm))
+                (w.id && w.id.toString().includes(term)) ||
+                (w.userId && w.userId.toString().includes(term)) ||
+                (user.username && user.username.toLowerCase().includes(term))
             );
         });
 
@@ -560,6 +678,10 @@ app.get('/deals', (req, res) => {
 
 app.get('/broadcasts', (req, res) => {
     sendHtmlFile(res, path.join(__dirname, 'public/html/broadcasts.html'));
+});
+
+app.get('/raffles', (req, res) => {
+    sendHtmlFile(res, path.join(__dirname, 'public/html/raffles.html'));
 });
 
 app.get('/withdrawals', (req, res) => {

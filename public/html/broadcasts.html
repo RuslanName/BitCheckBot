@@ -14,7 +14,8 @@
         <a href="/users">Пользователи</a>
         <a href="/deals">Сделки</a>
         <a href="/withdrawals">Вывод рефералов</a>
-        <a href="/broadcasts">Рассылка</a>
+        <a href="/raffles">Розыгрыши</a>
+        <a href="/broadcasts" class="active">Рассылка</a>
         <a href="/analytics">Аналитика</a>
         <a href="#" id="logoutBtn">Выйти</a>
     </nav>
@@ -28,30 +29,37 @@
                 </div>
                 <div class="form-group">
                     <label for="image">Фото:</label>
-                    <input type="file" id="image" accept="image/png,image/jpeg">
+                    <input type="file" id="image" accept="image/*">
                 </div>
                 <div class="form-group">
-                    <label for="scheduledTime">Запланированное время (ДД.ММ.ГГГГ ЧЧ:ММ):</label>
-                    <input type="text" id="scheduledTime" placeholder="29.05.2025 10:00">
+                    <label for="scheduledTime">Запланированное время:</label>
+                    <input type="datetime-local" id="scheduledTime">
                 </div>
-                <div class="checkbox-group">
-                    <label class="checkbox-label">
-                        <input type="checkbox" id="isDaily">
-                        Ежедневная рассылка
-                    </label>
+                <div class="form-group">
+                    <div class="toggle-container">
+                        <label class="switch">
+                            <input type="checkbox" id="isDaily" />
+                            <span class="slider round"></span>
+                        </label>
+                        <span class="toggle-label">Ежедневная рассылка</span>
+                    </div>
                 </div>
-                <button type="submit">Отправить</button>
-                <div id="formError" style="color: red; display: none;"></div>
+                <button type="submit" class="submit-button">Создать</button>
+                <p id="formError" class="error" style="display: none;"></p>
             </form>
         </section>
         <section>
             <div class="controls">
-                <input type="text" id="searchId" placeholder="Поиск по ID или тексту">
-                <select id="perPage">
-                    <option value="25">25</option>
-                    <option value="50" selected>50</option>
-                    <option value="100">100</option>
-                </select>
+                <div class="filter-group">
+                    <input type="text" id="searchId" placeholder="Поиск по ID или тексту">
+                </div>
+                <div class="per-page-container">
+                    <select id="perPage">
+                        <option value="25">25</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                    </select>
+                </div>
             </div>
             <table id="broadcastsTable">
                 <thead>

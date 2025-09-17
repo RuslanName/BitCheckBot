@@ -20,12 +20,6 @@ function initializeUsers() {
         const filterTurnover = document.getElementById('filterTurnover');
         const filterActivity = document.getElementById('filterActivity');
 
-        if (!tbody || !searchInput || !perPageSelect || !prevBtn || !nextBtn || !pageInfo ||
-            !filterRegistrationDate || !filterDealsCount || !filterTurnover || !filterActivity) {
-            console.error('Missing required elements for users page');
-            return;
-        }
-
         let users = [];
         let deals = [];
         let withdrawals = [];
