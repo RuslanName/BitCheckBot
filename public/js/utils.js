@@ -35,6 +35,7 @@ function checkAuth(callback) {
         api.get('/user')
             .then(response => {
                 userRole = response.data.role || 'admin';
+                document.body.classList.remove('hidden');
                 userCurrency = response.data.currency;
                 callback(userRole, userCurrency);
             })

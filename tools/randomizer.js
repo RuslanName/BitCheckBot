@@ -1,5 +1,6 @@
 const fs = require('fs-extra');
 const path = require('path');
+const { DATA_PATH } = require("./constants");
 
 function customRandom(seed) {
     const x = Math.sin(seed) * 10000;
@@ -25,7 +26,7 @@ function selectWinners(users, seed, numWinners) {
 }
 
 function loadJson(name) {
-    const filePath = path.join(process.env.DATA_PATH, 'database', `${name}.json`);
+    const filePath = path.join(DATA_PATH, 'database', `${name}.json`);
     try {
         if (!fs.existsSync(filePath)) {
             return [];
@@ -67,18 +68,17 @@ function generateRaffleResults(raffle) {
     const numWinners = Math.min(raffle.prizes.length, eligibleUsers.length);
     const winners = selectWinners(eligibleUsers, seed, numWinners);
 
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    const outputPath = path.join(process.env.DATA_PATH, 'files', 'giveaways', `results_${raffle.id}_${uniqueSuffix}.txt`);
+    const outputPath = path.join(DATA_PATH, 'files', 'giveaways', `results_${raffle.id}.txt`);
     fs.ensureDirSync(path.dirname(outputPath));
 
     const conditionText = raffle.condition.type === 'dealCount'
-        ? `Количество сделок: ${raffle.condition.value}`
-        : `Сумма сделок: ${raffle.condition.value} RUB`;
+        ? `количество сделок >= ${raffle.condition.value}`
+        : `сумма сделок >= ${raffle.condition.value} RUB`;
 
     const output = `Розыгрыш ID: ${raffle.id}
 Период: ${new Date(raffle.startDate).toLocaleString()} - ${new Date(raffle.endDate).toLocaleString()}
 Условие: ${conditionText}
-Формула: sin(seed) * 10000 - floor(sin(seed) * 10000)
+Формула: Sin(seed) * 10000 - Floor(Sin(seed) * 10000)
 Сид: ${seed}
 
 Участники, выполнившие условия:

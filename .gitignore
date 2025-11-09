@@ -1,5 +1,8 @@
 node_modules
-database
 .idea
 .gitignore
 .env
+data/database
+data/files
+data/images/broadcasts
+test.js

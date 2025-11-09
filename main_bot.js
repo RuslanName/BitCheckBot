@@ -1,17 +1,33 @@
 const { Telegraf } = require('telegraf');
+const RateLimit = require('telegraf-ratelimit');
 const fs = require('fs-extra');
 const path = require('path');
 const axios = require('axios');
 const cron = require('node-cron');
 const async = require('async');
-require('dotenv').config();
+const crypto = require('crypto');
+const {v4: uuidv4} = require("uuid");
 const { broadcastEmitter, raffleEmitter } = require('./server');
-const { generateRaffleResults } = require('./randomizer');
+const { generateRaffleResults } = require('./tools/randomizer');
+const { generateCaptcha } = require('./tools/captcha');
+const { loadJson, saveJson } = require('./tools/utils');
+const { POST_SCRIPT, BIT_CHECK_IMAGE_PATH, CACHE_DURATION, DATA_PATH, MAIN_BOT_TOKEN,
+    COIN_PRICE_API_URL, MERCHANT_API_URL, MERCHANT_API_KEY,
+    MERCHANT_SECRET, PAYMENT_OPTION_NAMES, BIT_CHECK_GROUP_URL, BIT_CHECK_CHAT_URL
+} = require('./tools/constants');
 
-const main_bot = new Telegraf(process.env.MAIN_BOT_TOKEN);
+let cachedBtcRubPrice = 8200000;
+let cachedLtcRubPrice = 6800;
+let lastPriceUpdate = 0;
 
-const BIT_CHECK_IMAGE_PATH = path.join(process.env.DATA_PATH + 'images/bit-check-image.png');
 let cachedBitCheckFileId = null;
+
+const cronTasks = new Map();
+
+let isScheduling = false;
+let reloadTimeout = null;
+
+const main_bot = new Telegraf(MAIN_BOT_TOKEN);
 
 main_bot.telegram.setMyCommands([
     { command: 'start', description: 'Запустить бота и открыть меню' }
@@ -21,15 +37,261 @@ main_bot.telegram.setMyCommands([
     console.error('Error setting bot commands:', err.message);
 });
 
-let cachedBtcRubPrice = 8200000;
-let cachedLtcRubPrice = 6800;
-let lastPriceUpdate = 0;
-const CACHE_DURATION = 3 * 60 * 1000;
+function getAvailablePaymentDetails(currency, dealRubAmount) {
+    const config = loadJson('config') || {};
+    const deals = loadJson('deals') || [];
+    let paymentDetails;
 
-const cronTasks = new Map();
+    if (currency === 'BTC') {
+        paymentDetails = config.buyPaymentDetailsBTC || [];
+    } else if (currency === 'LTC') {
+        paymentDetails = config.buyPaymentDetailsLTC || [];
+    }
 
-let isScheduling = false;
-let reloadTimeout = null;
+    const paymentTimeout = (config.dealCreationRecoveryMinutes || 60) * 60 * 1000;
+    const limitReachedTimeout = (config.limitReachedRecoveryHours || 24) * 60 * 60 * 1000;
+    const now = new Date();
+
+    if (paymentDetails.length === 0) {
+        return null;
+    }
+
+    const calculateRubAmount = (paymentDetailId) => {
+        return deals
+            .filter(d =>
+                d.selectedPaymentDetailsId === paymentDetailId &&
+                ['unpaid', 'pending', 'completed'].includes(d.status) &&
+                new Date(d.timestamp) >= new Date(paymentDetails.find(pd => pd.id === paymentDetailId)?.lastResetTimestamp || 0)
+            )
+            .reduce((sum, d) => sum + (d.rubAmount || 0), 0);
+    };
+
+    const availableCards = paymentDetails.filter(d => {
+        const currentRubAmount = calculateRubAmount(d.id);
+        const totalRubAmount = currentRubAmount + dealRubAmount;
+        const recoveryEndTime = new Date(d.lastResetTimestamp || 0).getTime() + limitReachedTimeout;
+        const paymentDeadline = new Date(d.timestamp).getTime() + paymentTimeout;
+        return (totalRubAmount <= d.limitReachedRub) && (recoveryEndTime < now.getTime()) &&
+            (paymentDeadline < now.getTime());
+    });
+
+    if (availableCards.length === 0) {
+        return null;
+    }
+
+    const maxUsages = Math.max(...availableCards.map(d => d.confirmedUsages));
+    const lagging = availableCards.filter(d => d.confirmedUsages < maxUsages - 1);
+
+    const selectOldest = (arr) => {
+        if (arr.length === 0) return null;
+        return arr.reduce((oldest, current) => {
+            if (!oldest) return current;
+            if (current.confirmedUsages < oldest.confirmedUsages) return current;
+            if (current.confirmedUsages > oldest.confirmedUsages) return oldest;
+            const oldestTime = new Date(oldest.timestamp);
+            const currentTime = new Date(current.timestamp);
+            return currentTime < oldestTime ? current : oldest;
+        }, null);
+    };
+
+    if (lagging.length === 0) {
+        return selectOldest(availableCards);
+    } else {
+        const p = 0.5;
+        if (Math.random() < p) {
+            return selectOldest(lagging);
+        } else {
+            const nonLagging = availableCards.filter(d => d.confirmedUsages >= maxUsages - 1);
+            return selectOldest(nonLagging);
+        }
+    }
+}
+
+function calculateSignature(method, url, bodyContent = "") {
+    const stringToSign = method + url + bodyContent;
+    return crypto.createHmac('sha1', MERCHANT_SECRET).update(stringToSign).digest('base64');
+}
+
+async function getMerchantPaymentDetails(amount, userId, merchantApiKey) {
+    try {
+        const merchantInternalId = uuidv4();
+        const url = `${MERCHANT_API_URL}/api/merchant/invoices`;
+        const bodyContent = JSON.stringify({
+            type: "in",
+            amount: amount.toString(),
+            currency: 'RUB',
+            notificationUrl: "",
+            notificationToken: "",
+            internalId: merchantInternalId,
+            userId: userId.toString(),
+        });
+        const signature = calculateSignature('POST', url, bodyContent);
+
+        const response = await axios.post(
+            url,
+            bodyContent,
+            {
+                headers: {
+                    'X-Identity': merchantApiKey,
+                    'X-Signature': signature,
+                    'Content-Type': 'application/json'
+                }
+            }
+        );
+        return response.data;
+    } catch (error) {
+        console.error(`Error fetching payment details:`, error.message);
+        throw error;
+    }
+}
+
+async function getAvailablePaymentVariants(id, merchantApiKey) {
+    try {
+        const url = `${MERCHANT_API_URL}/api/merchant/invoices/${id}/available-payment-variants`;
+        const signature = calculateSignature('GET', url);
+
+        const response = await axios.get(
+            url,
+            {
+                headers: {
+                    'X-Identity': merchantApiKey,
+                    'X-Signature': signature,
+                    'Content-Type': 'application/json'
+                }
+            }
+        );
+        return response.data;
+    } catch (error) {
+        console.error(`Error fetching payment variants:`, error.message);
+        throw error;
+    }
+}
+
+async function startMerchantDeal(id, paymentMethod, merchantApiKey) {
+    try {
+        const url = `${MERCHANT_API_URL}/api/merchant/invoices/${id}/start-deal`;
+        const bodyContent = JSON.stringify({
+            paymentMethod: paymentMethod,
+        });
+        const signature = calculateSignature('POST', url, bodyContent);
+
+        const response = await axios.post(
+            url,
+            bodyContent,
+            {
+                headers: {
+                    'X-Identity': merchantApiKey,
+                    'X-Signature': signature,
+                    'Content-Type': 'application/json'
+                }
+            }
+        );
+        return response.data;
+    } catch (error) {
+        console.error(`Error start merchant deal:`, error.message);
+        throw error;
+    }
+}
+
+async function getMerchantInvoice(id, merchantApiKey) {
+    try {
+        const url = `${MERCHANT_API_URL}/api/merchant/invoices/${id}`;
+        const signature = calculateSignature('GET', url);
+
+        const response = await axios.get(
+            url,
+            {
+                headers: {
+                    'X-Identity': merchantApiKey,
+                    'X-Signature': signature,
+                    'Content-Type': 'application/json'
+                }
+            }
+        );
+        return response.data;
+    } catch (error) {
+        console.error(`Error fetching merchant invoice:`, error.message);
+        throw error;
+    }
+}
+
+async function getPaymentMethodName(code) {
+    try {
+        const response = await axios.get(`${MERCHANT_API_URL}/api/public/payment-methods/RUB`);
+        const paymentMethods = response.data.reduce((acc, method) => {
+            acc[method.code] = method.name;
+            return acc;
+        }, {});
+        return paymentMethods[code] || code;
+    } catch (error) {
+        console.error(`Error fetching payment method name for code ${code}:`, error.message);
+        return code;
+    }
+}
+
+async function cancelInvoice(id, merchantApiKey) {
+    try {
+        const url = `${MERCHANT_API_URL}/api/merchant/invoices/${id}/cancel`;
+        const bodyContent = "";
+        const signature = calculateSignature('POST', url, bodyContent);
+
+        const response = await axios.post(
+            url,
+            bodyContent,
+            {
+                headers: {
+                    'X-Identity': merchantApiKey,
+                    'X-Signature': signature,
+                    'Content-Type': 'application/json'
+                }
+            }
+        );
+        return response.data;
+    } catch (error) {
+        console.error(`Error canceling invoice:`, error.message);
+        throw error;
+    }
+}
+
+async function updatePrices() {
+    const now = Date.now();
+    if (now - lastPriceUpdate < CACHE_DURATION) {
+        return;
+    }
+
+    try {
+        const response = await axios.get(`${COIN_PRICE_API_URL}/api/v3/simple/price?ids=bitcoin,litecoin&vs_currencies=rub`, { timeout: 10000 });
+        cachedBtcRubPrice = response.data.bitcoin.rub || cachedBtcRubPrice;
+        cachedLtcRubPrice = response.data.litecoin.rub || cachedLtcRubPrice;
+        lastPriceUpdate = now;
+    } catch (error) {
+        if (error.response && error.response.status === 429) {
+            await new Promise(resolve => setTimeout(resolve, 5000));
+            try {
+                const retryResponse = await axios.get(`${COIN_PRICE_API_URL}/api/v3/simple/price?ids=bitcoin,litecoin&vs_currencies=rub`, { timeout: 10000 });
+                cachedBtcRubPrice = retryResponse.data.bitcoin.rub || cachedBtcRubPrice;
+                cachedLtcRubPrice = retryResponse.data.litecoin.rub || cachedLtcRubPrice;
+                lastPriceUpdate = now;
+            } catch (retryError) {
+                throw new Error(`Failed to update prices after retry: ${retryError.message}`);
+            }
+        } else {
+            throw new Error(`Failed to update prices: ${error.message}`);
+        }
+    }
+}
+
+async function getBtcRubPrice() {
+    await updatePrices();
+    return cachedBtcRubPrice;
+}
+
+async function getLtcRubPrice() {
+    await updatePrices();
+    return cachedLtcRubPrice;
+}
+
+setInterval(updatePrices, CACHE_DURATION);
 
 function formatDate(date, includeTime = false) {
     const options = {
@@ -47,73 +309,103 @@ function formatDate(date, includeTime = false) {
     return new Date(date).toLocaleString("ru-RU", options).replace(",", "");
 }
 
-function loadJson(name) {
-    const filePath = path.join(process.env.DATA_PATH, 'database', `${name}.json`);
+async function getCommissionDiscount(userId) {
     try {
-        if (!fs.existsSync(filePath)) {
-            return [];
+        const config = loadJson('config');
+        const users = loadJson('users');
+        const deals = loadJson('deals');
+
+        let totalDiscount = 0;
+
+        const vipUser = config.vipUsersData?.find(vip => vip.username === users.find(u => u.id === userId)?.username);
+        if (vipUser && vipUser.discount) {
+            totalDiscount += vipUser.discount;
         }
-        return fs.readJsonSync(filePath);
-    } catch (err) {
-        console.error(`Error loading ${name}.json:`, err.message);
-        return [];
-    }
-}
 
-function saveJson(name, data) {
-    try {
-        const filePath = path.join(process.env.DATA_PATH, 'database', `${name}.json`);
-        fs.writeJsonSync(filePath, data, { spaces: 2 });
-    } catch (err) {
-        console.error(`Error saving ${name}.json:`, err.message);
-    }
-}
-
-function loadStates() {
-    const filePath = path.join(process.env.DATA_PATH, 'database', 'states.json');
-    try {
-        if (!fs.existsSync(filePath)) {
-            const defaultStates = {
-                pendingCaptcha: {},
-                pendingUpdateProfile: {},
-                pendingDeal: {},
-                pendingWithdrawal: {},
-                pendingSupport: {},
-                pendingOperatorMessages: {}
-            };
-            fs.writeFileSync(filePath, JSON.stringify(defaultStates, null, 2));
-            return defaultStates;
+        const userDeals = deals.filter(d => d.userId === userId && d.status === 'completed');
+        const turnover = userDeals.reduce((sum, d) => sum + (d.rubAmount || d.amount || 0), 0);
+        const discounts = config.commissionDiscounts || [];
+        for (let i = discounts.length - 1; i >= 0; i--) {
+            if (turnover >= discounts[i].amount) {
+                totalDiscount += discounts[i].discount;
+                break;
+            }
         }
-        return JSON.parse(fs.readFileSync(filePath));
+
+        return totalDiscount;
     } catch (err) {
-        console.error('Error loading states.json:', err.message);
-        return {
-            pendingCaptcha: {},
-            pendingUpdateProfile: {},
-            pendingDeal: {},
-            pendingWithdrawal: {},
-            pendingSupport: {},
-            pendingOperatorMessages: {}
-        };
+        console.error('Error calculating commission discount:', err.message);
+        return 0;
     }
 }
 
-function clearPendingStates(states, userId) {
-    delete states.pendingDeal[userId];
-    delete states.pendingWithdrawal[userId];
-    delete states.pendingUpdateProfile[userId];
-    delete states.pendingSupport[userId];
+async function calculateCommission(amount, currency, type) {
+    const config = loadJson('config');
+    const commissionScale = type === 'buy'
+        ? (currency === 'BTC' ? config.buyCommissionScalePercentBTC : config.buyCommissionScalePercentLTC)
+        : (currency === 'BTC' ? config.sellCommissionScalePercentBTC : config.sellCommissionScalePercentLTC);
 
-    saveJson('states', states);
+    let commissionPercent = commissionScale[0].commission;
+    for (const scale of commissionScale) {
+        if (amount >= scale.amount) {
+            commissionPercent = scale.commission;
+        } else {
+            break;
+        }
+    }
+
+    return (amount * commissionPercent) / 100;
 }
 
-async function isValidChat(chatId) {
-    try {
-        await main_bot.telegram.getChat(chatId);
-        return true;
-    } catch (error) {
-        console.error(`Invalid chat ${chatId}:`, error.message);
-        return false;
+function calculateUserStats(userId) {
+    const deals = loadJson('deals');
+    const userDeals = deals.filter(d => d.userId === userId && d.status === 'completed');
+    const stats = {
+        dealsCount: userDeals.length,
+        boughtBTC: { rub: 0, crypto: 0 },
+        boughtLTC: { rub: 0, crypto: 0 },
+        soldBTC: { rub: 0, crypto: 0 },
+        soldLTC: { rub: 0, crypto: 0 }
+    };
+
+    userDeals.forEach(deal => {
+        if (deal.type === 'buy') {
+            if (deal.currency === 'BTC') {
+                stats.boughtBTC.rub += deal.rubAmount || 0;
+                stats.boughtBTC.crypto += deal.cryptoAmount || 0;
+            } else if (deal.currency === 'LTC') {
+                stats.boughtLTC.rub += deal.rubAmount || 0;
+                stats.boughtLTC.crypto += deal.cryptoAmount || 0;
+            }
+        } else if (deal.type === 'sell') {
+            if (deal.currency === 'BTC') {
+                stats.soldBTC.rub += deal.rubAmount || 0;
+                stats.soldBTC.crypto += deal.cryptoAmount || 0;
+            } else if (deal.currency === 'LTC') {
+                stats.soldLTC.rub += deal.rubAmount || 0;
+                stats.soldLTC.crypto += deal.cryptoAmount || 0;
+            }
+        }
+    });
+
+    return stats;
+}
+
+function getOperatorContactUrl(currency) {
+    const config = loadJson('config');
+    if (config.multipleOperatorsMode && config.multipleOperatorsData.length > 0) {
+        const operator = config.multipleOperatorsData.find(op => op.currency === currency) || config.multipleOperatorsData[0];
+        return `https://t.me/${operator.username}`;
+    }
+    return `https://t.me/${config.singleOperatorUsername}`;
+}
+
+function getOperators(currency) {
+    const config = loadJson('config');
+    if (config.multipleOperatorsMode && config.multipleOperatorsData.length > 0) {
+        return config.multipleOperatorsData.filter(op => op.currency === currency);
+    } else {
+        return [{ username: config.singleOperatorUsername, currency }];
     }
 }
 
@@ -279,6 +571,67 @@ async function scheduleTasks() {
     }
 }
 
+function reloadTasks() {
+    if (reloadTimeout) {
+        console.log('Reload already scheduled, skipping');
+        return;
+    }
+
+    reloadTimeout = setTimeout(async () => {
+        try {
+            await scheduleTasks();
+        } catch (err) {
+            console.error('Error reloading tasks:', err.message);
+        } finally {
+            reloadTimeout = null;
+        }
+    }, 30000);
+}
+
+broadcastEmitter.on('newBroadcast', async () => {
+    const broadcasts = loadJson('broadcasts') || [];
+    const latestBroadcast = broadcasts[broadcasts.length - 1];
+    if (latestBroadcast) {
+        console.log(`New broadcast ${latestBroadcast.id} detected, scheduling tasks`);
+        await scheduleTasks();
+    }
+});
+
+broadcastEmitter.on('updateBroadcast', async () => {
+    console.log('Broadcast updated, rescheduling tasks');
+    await scheduleTasks();
+});
+
+fs.watch(path.join(DATA_PATH, 'database', 'broadcasts.json'), (eventType, filename) => {
+    if (eventType === 'change') {
+        console.log('Broadcasts file changed, reloading tasks');
+        reloadTasks();
+    }
+});
+
+raffleEmitter.on('newRaffle', async () => {
+    const raffles = loadJson('raffles') || [];
+    const latestRaffle = raffles[raffles.length - 1];
+    if (latestRaffle) {
+        console.log(`New raffle ${latestRaffle.id} detected, scheduling tasks`);
+        await scheduleTasks();
+    }
+});
+
+raffleEmitter.on('updateRaffle', async () => {
+    console.log('Raffle updated, rescheduling tasks');
+    await scheduleTasks();
+});
+
+fs.watch(path.join(DATA_PATH, 'database', 'raffles.json'), (eventType, filename) => {
+    if (eventType === 'change') {
+        console.log('Raffles file changed, reloading tasks');
+        reloadTasks();
+    }
+});
+
+reloadTasks();
+
 async function sendBroadcast(broadcast) {
     let success = true;
     let broadcasts = loadJson('broadcasts') || [];
@@ -300,7 +653,7 @@ async function sendBroadcast(broadcast) {
         photoSource = broadcast.file_id;
     } else {
         imagePath = broadcast.imageName
-            ? path.join(process.env.DATA_PATH, 'images/broadcasts', broadcast.imageName)
+            ? path.join(DATA_PATH, 'images/broadcasts', broadcast.imageName)
             : BIT_CHECK_IMAGE_PATH;
         if (!fs.existsSync(imagePath)) {
             photoSource = BIT_CHECK_IMAGE_PATH;
@@ -333,7 +686,7 @@ async function sendBroadcast(broadcast) {
 
         try {
             const options = {
-                caption: `${broadcast.text}\n\n🚀 BitCheck — твой надёжный обменник для покупки и продажи Bitcoin и Litecoin!`
+                caption: `${broadcast.text}\n\n${POST_SCRIPT}`
             };
             let msg = await main_bot.telegram.sendPhoto(user.id, photoSource, options);
 
@@ -409,13 +762,13 @@ async function sendRaffleNotification(raffle) {
     const users = loadJson('users') || [];
     const conditionText = raffle.condition.type === 'dealCount'
         ? `Необходимо совершить не менее ${raffle.condition.value} сделок`
-        : `Необходимо совершить сделок на сумму не менее ${raffle.condition.value}000 RUB`;
+        : `Необходимо совершить сделок на сумму не менее ${raffle.condition.value} RUB`;
 
     const caption = `🎉 Новый розыгрыш!\n\n` +
         `📋 Условия:\n${conditionText}\n\n` +
         `🎁 Призы:\n${raffle.prizes.map((p, i) => `${i + 1}) ${p}`).join('\n')}\n\n` +
         `⏰ Результаты розыгрыша будут объявлены ${formatDate(raffle.endDate, true)}\n\n` +
-        `🚀 Сделки с BitCheck — ключ к вашей победе!`;
+        `${POST_SCRIPT}`;
 
     const BATCH_SIZE = 25;
     const batchDelay = 10000;
@@ -464,7 +817,7 @@ async function processRaffleEnd(raffle) {
         return;
     }
 
-    const { winners, outputPath } = generateRaffleResults(raffle);
+    const { winners } = generateRaffleResults(raffle);
     raffles[raffleIndex] = { ...raffles[raffleIndex], status: 'completed' };
     saveJson('raffles', raffles);
     cronTasks.delete(`raffle_${raffle.id}`);
@@ -551,18 +904,45 @@ async function checkUnpaidDeals() {
         const users = loadJson('users') || [];
         const states = loadStates() || {};
         const now = new Date();
-        const paymentTimeout = (config.paymentDetailsRecoveryTimeMinutes || 60) * 60 * 1000;
+        const paymentTimeout = (config.dealPaymentDeadlineMinutes || 15) * 60 * 1000;
 
-        for (const deal of deals) {
+        for (let i = deals.length - 1; i >= 0; i--) {
+            const deal = deals[i];
             if (deal.status !== 'unpaid') continue;
 
-            const dealTime = new Date(deal.timestamp);
-            if (now - dealTime > paymentTimeout) {
+            let isExpired = false;
+            if (!deal.selectedPaymentDetailsId) {
+                const dealTime = new Date(deal.timestamp);
+                if (now - dealTime > paymentTimeout) {
+                    deals.splice(i, 1);
+                    continue;
+                }
+            } else if (deal.processingStatus) {
+                try {
+                    const invoiceId = deal.selectedPaymentDetailsId || deal.paymentDetailsId;
+                    
+                    if (!invoiceId) {
+                        continue;
+                    }
+                    
+                    const transaction = await getMerchantInvoice(invoiceId, MERCHANT_API_KEY);
+                    if (transaction.expires_at) {
+                        const expiresAt = new Date(transaction.expires_at);
+                        if (now > expiresAt) {
+                            isExpired = true;
+                        }
+                    }
+                } catch (error) {
+                    console.error(`Error checking transaction ${deal.selectedPaymentDetailsId} for deal ${deal.id}:`, error.message);
+                }
+            }
+
+            if (isExpired) {
                 deal.status = 'expired';
                 const user = users.find(u => u.id === deal.userId);
                 if (!user) continue;
 
-                const contactUrl = getContactUrl(deal.currency);
+                const operatorContactUrl = getOperatorContactUrl(deal.currency);
                 const caption = `❌ Время оплаты по заявке № ${deal.id} истекло!\n` +
                     `Покупка ${deal.currency}\n` +
                     `Количество: ${deal.cryptoAmount} ${deal.currency}\n` +
@@ -570,15 +950,11 @@ async function checkUnpaidDeals() {
                     `‼️ Если произошла ошибка, пожалуйста, свяжитесь с оператором!`;
 
                 try {
-                    if (states.pendingDeal?.[deal.userId]?.messageId) {
-                        await main_bot.telegram.deleteMessage(deal.userId, states.pendingDeal[deal.userId].messageId);
-                    }
-
                     const message = await sendBitCheckPhoto(deal.userId, {
                         caption,
                         reply_markup: {
                             inline_keyboard: [
-                                [{ text: '📞 Написать оператору', url: contactUrl }]
+                                [{ text: '📞 Написать оператору', url: operatorContactUrl }]
                             ]
                         },
                         parse_mode: 'HTML'
@@ -597,236 +973,113 @@ async function checkUnpaidDeals() {
     }
 }
 
-function reloadTasks() {
-    if (reloadTimeout) {
-        console.log('Reload already scheduled, skipping');
+async function checkInvoiceStatus(dealId, userId, invoiceId, merchantApiKey, maxAttempts = 4) {
+    const states = loadStates();
+    const deals = loadJson('deals');
+    const dealIndex = deals.findIndex(d => d.id === dealId && d.status === 'pending');
+    if (dealIndex === -1) {
+        console.log(`Deal ${dealId} not found or already processed, stopping status check`);
         return;
     }
 
-    reloadTimeout = setTimeout(async () => {
+    let attempts = 0;
+    const checkTask = cron.schedule('*/5 * * * *', async () => {
         try {
-            await scheduleTasks();
-        } catch (err) {
-            console.error('Error reloading tasks:', err.message);
-        } finally {
-            reloadTimeout = null;
-        }
-    }, 30000);
-}
+            const invoice = await getMerchantInvoice(invoiceId, merchantApiKey);
+            const dealStatus = invoice.deals && invoice.deals.length > 0 ? invoice.deals[0].status : null;
+            if (dealStatus === 'completed') {
+                deals[dealIndex].status = 'completed';
+                saveJson('deals', deals);
 
-broadcastEmitter.on('newBroadcast', async () => {
-    const broadcasts = loadJson('broadcasts') || [];
-    const latestBroadcast = broadcasts[broadcasts.length - 1];
-    if (latestBroadcast) {
-        console.log(`New broadcast ${latestBroadcast.id} detected, scheduling tasks`);
-        await scheduleTasks();
-    }
-});
+                const config = loadJson('config');
+                const operatorContactUrl = getOperatorContactUrl(deals[dealIndex].currency);
+                const priorityPrice = deals[dealIndex].priority === 'elevated' ? config.priorityPriceRub : 0;
+                const discount = await getCommissionDiscount(userId);
 
-broadcastEmitter.on('updateBroadcast', async () => {
-    console.log('Broadcast updated, rescheduling tasks');
-    await scheduleTasks();
-});
+                const caption = `✅ Сделка №${dealId} завершена!\n` +
+                    `Покупка ${deals[dealIndex].currency}\n` +
+                    `Количество: ${deals[dealIndex].cryptoAmount} ${deals[dealIndex].currency}\n` +
+                    `Сумма: ${deals[dealIndex].rubAmount} RUB\n` +
+                    `Комиссия: ${deals[dealIndex].commission} RUB (скидка ${discount.toFixed(2)}%)\n` +
+                    `Приоритет: ${deals[dealIndex].priority === 'elevated' ? `Повышенный (+${priorityPrice} RUB)` : 'Обычный'}\n` +
+                    `Итог: ${deals[dealIndex].total} RUB\n` +
+                    `Кошелёк: ${deals[dealIndex].walletAddress}`;
 
-fs.watch(path.join(process.env.DATA_PATH, 'database', 'broadcasts.json'), (eventType, filename) => {
-    if (eventType === 'change') {
-        console.log('Broadcasts file changed, reloading tasks');
-        reloadTasks();
-    }
-});
+                try {
+                    const message = await sendBitCheckPhoto(userId, {
+                        caption,
+                        reply_markup: {
+                            inline_keyboard: [
+                                [{ text: '📞 Написать оператору', url: operatorContactUrl }]
+                            ]
+                        },
+                        parse_mode: 'HTML'
+                    });
+                    states.pendingDeal[userId] = { messageId: message.message_id };
+                    saveJson('states', states);
+                } catch (error) {
+                    console.error(`Error sending completion notification to user ${userId}:`, error.message);
+                }
 
-raffleEmitter.on('newRaffle', async () => {
-    const raffles = loadJson('raffles') || [];
-    const latestRaffle = raffles[raffles.length - 1];
-    if (latestRaffle) {
-        console.log(`New raffle ${latestRaffle.id} detected, scheduling tasks`);
-        await scheduleTasks();
-    }
-});
+                cronTasks.delete(`check_invoice_${dealId}`);
+                checkTask.stop();
+            } else if (attempts >= maxAttempts) {
+                deals[dealIndex].status = 'expired';
+                saveJson('deals', deals);
 
-raffleEmitter.on('updateRaffle', async () => {
-    console.log('Raffle updated, rescheduling tasks');
-    await scheduleTasks();
-});
+                const operatorContactUrl = getOperatorContactUrl(deals[dealIndex].currency);
+                const caption = `❌ Время подтверждения по заявке № ${dealId} истекло!\n` +
+                    `Покупка ${deals[dealIndex].currency}\n` +
+                    `Количество: ${deals[dealIndex].cryptoAmount} ${deals[dealIndex].currency}\n` +
+                    `Сумма: ${deals[dealIndex].rubAmount} RUB\n\n` +
+                    `‼️ Если произошла ошибка, пожалуйста, свяжитесь с оператором!`;
 
-fs.watch(path.join(process.env.DATA_PATH, 'database', 'raffles.json'), (eventType, filename) => {
-    if (eventType === 'change') {
-        console.log('Raffles file changed, reloading tasks');
-        reloadTasks();
-    }
-});
+                try {
+                    const message = await sendBitCheckPhoto(userId, {
+                        caption,
+                        reply_markup: {
+                            inline_keyboard: [
+                                [{ text: '📞 Написать оператору', url: operatorContactUrl }]
+                            ]
+                        },
+                        parse_mode: 'HTML'
+                    });
+                    states.pendingDeal[userId] = { messageId: message.message_id };
+                    saveJson('states', states);
+                } catch (error) {
+                    console.error(`Error sending expiration notification to user ${userId}:`, error.message);
+                }
 
-reloadTasks();
-
-async function getCommissionDiscount(userId) {
-    try {
-        const config = loadJson('config');
-        const users = loadJson('users');
-        const deals = loadJson('deals');
-
-        let totalDiscount = 0;
-
-        const vipUser = config.vipUsersData?.find(vip => vip.username === users.find(u => u.id === userId)?.username);
-        if (vipUser && vipUser.discount) {
-            totalDiscount += vipUser.discount;
-        }
-
-        const userDeals = deals.filter(d => d.userId === userId && d.status === 'completed');
-        const turnover = userDeals.reduce((sum, d) => sum + (d.rubAmount || d.amount || 0), 0);
-        const discounts = config.commissionDiscounts || [];
-        for (let i = discounts.length - 1; i >= 0; i--) {
-            if (turnover >= discounts[i].amount) {
-                totalDiscount += discounts[i].discount;
-                break;
+                cronTasks.delete(`check_invoice_${dealId}`);
+                checkTask.stop();
             }
-        }
-
-        return totalDiscount;
-    } catch (err) {
-        console.error('Error calculating commission discount:', err.message);
-        return 0;
-    }
-}
-
-async function calculateCommission(amount, currency, type) {
-    const config = loadJson('config');
-    const commissionScale = type === 'buy'
-        ? (currency === 'BTC' ? config.buyCommissionScalePercentBTC : config.buyCommissionScalePercentLTC)
-        : (currency === 'BTC' ? config.sellCommissionScalePercentBTC : config.sellCommissionScalePercentLTC);
-
-    let commissionPercent = commissionScale[0].commission;
-    for (const scale of commissionScale) {
-        if (amount >= scale.amount) {
-            commissionPercent = scale.commission;
-        } else {
-            break;
-        }
-    }
-
-    return (amount * commissionPercent) / 100;
-}
-
-function getBalancedPaymentDetails(buyPaymentDetails) {
-    if (buyPaymentDetails.length === 0) {
-        return null;
-    }
-
-    const maxUsages = Math.max(...buyPaymentDetails.map(d => d.confirmedUsages));
-
-    const lagging = buyPaymentDetails.filter(d => d.confirmedUsages < maxUsages - 1);
-
-    const selectOldest = (arr) => {
-        if (arr.length === 0) return null;
-        return arr.reduce((oldest, current) => {
-            if (!oldest) return current;
-            if (current.confirmedUsages < oldest.confirmedUsages) return current;
-            if (current.confirmedUsages > oldest.confirmedUsages) return oldest;
-            const oldestTime = new Date(oldest.timestamp);
-            const currentTime = new Date(current.timestamp);
-            return currentTime < oldestTime ? current : oldest;
-        }, null);
-    };
-
-    if (lagging.length === 0) {
-        return selectOldest(buyPaymentDetails);
-    } else {
-        const p = 0.5;
-        if (Math.random() < p) {
-            return selectOldest(lagging);
-        } else {
-            const nonLagging = buyPaymentDetails.filter(d => d.confirmedUsages >= maxUsages - 1);
-            return selectOldest(nonLagging);
-        }
-    }
-}
-
-function getContactUrl(currency) {
-    const config = loadJson('config');
-    if (config.multipleOperatorsMode && config.multipleOperatorsData.length > 0) {
-        const operator = config.multipleOperatorsData.find(op => op.currency === currency) || config.multipleOperatorsData[0];
-        return `https://t.me/${operator.username}`;
-    }
-    return `https://t.me/${config.singleOperatorUsername}`;
-}
-
-function getOperators(currency) {
-    const config = loadJson('config');
-    if (config.multipleOperatorsMode && config.multipleOperatorsData.length > 0) {
-        return config.multipleOperatorsData.filter(op => op.currency === currency);
-    } else {
-        return [{ username: config.singleOperatorUsername, currency }];
-    }
-}
-
-function calculateUserStats(userId) {
-    const deals = loadJson('deals');
-    const userDeals = deals.filter(d => d.userId === userId && d.status === 'completed');
-    const stats = {
-        dealsCount: userDeals.length,
-        boughtBTC: { rub: 0, crypto: 0 },
-        boughtLTC: { rub: 0, crypto: 0 },
-        soldBTC: { rub: 0, crypto: 0 },
-        soldLTC: { rub: 0, crypto: 0 }
-    };
-
-    userDeals.forEach(deal => {
-        if (deal.type === 'buy') {
-            if (deal.currency === 'BTC') {
-                stats.boughtBTC.rub += deal.rubAmount || 0;
-                stats.boughtBTC.crypto += deal.cryptoAmount || 0;
-            } else if (deal.currency === 'LTC') {
-                stats.boughtLTC.rub += deal.rubAmount || 0;
-                stats.boughtLTC.crypto += deal.cryptoAmount || 0;
+            attempts++;
+        } catch (error) {
+            console.error(`Error checking invoice status for deal ${dealId}:`, error.message);
+            if (attempts >= maxAttempts) {
+                cronTasks.delete(`check_invoice_${dealId}`);
+                checkTask.stop();
             }
-        } else if (deal.type === 'sell') {
-            if (deal.currency === 'BTC') {
-                stats.soldBTC.rub += deal.rubAmount || 0;
-                stats.soldBTC.crypto += deal.cryptoAmount || 0;
-            } else if (deal.currency === 'LTC') {
-                stats.soldLTC.rub += deal.rubAmount || 0;
-                stats.soldLTC.crypto += deal.cryptoAmount || 0;
-            }
+            attempts++;
         }
+    }, {
+        scheduled: true,
+        timezone: 'UTC'
     });
 
-    return stats;
+    cronTasks.set(`check_invoice_${dealId}`, checkTask);
+    console.log(`Scheduled invoice status check for deal ${dealId}`);
 }
 
-async function updatePrices() {
-    const now = Date.now();
-    if (now - lastPriceUpdate < CACHE_DURATION) {
-        return;
-    }
-
+async function isValidChat(chatId) {
     try {
-        const response = await axios.get('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,litecoin&vs_currencies=rub', { timeout: 10000 });
-        cachedBtcRubPrice = response.data.bitcoin.rub || cachedBtcRubPrice;
-        cachedLtcRubPrice = response.data.litecoin.rub || cachedLtcRubPrice;
-        lastPriceUpdate = now;
+        await main_bot.telegram.getChat(chatId);
+        return true;
     } catch (error) {
-        if (error.response && error.response.status === 429) {
-            await new Promise(resolve => setTimeout(resolve, 5000));
-            try {
-                const retryResponse = await axios.get('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,litecoin&vs_currencies=rub', { timeout: 10000 });
-                cachedBtcRubPrice = retryResponse.data.bitcoin.rub || cachedBtcRubPrice;
-                cachedLtcRubPrice = retryResponse.data.litecoin.rub || cachedLtcRubPrice;
-                lastPriceUpdate = now;
-            } catch (retryError) {}
-        }
+        console.error(`Invalid chat ${chatId}:`, error.message);
+        return false;
     }
 }
-
-async function getBtcRubPrice() {
-    await updatePrices();
-    return cachedBtcRubPrice;
-}
-
-async function getLtcRubPrice() {
-    await updatePrices();
-    return cachedLtcRubPrice;
-}
-
-setInterval(updatePrices, CACHE_DURATION);
 
 async function checkIfBlocked(ctx) {
     const users = loadJson('users');
@@ -837,6 +1090,60 @@ async function checkIfBlocked(ctx) {
     }
     return false;
 }
+
+function loadStates() {
+    const filePath = path.join(DATA_PATH, 'database', 'states.json');
+    try {
+        if (!fs.existsSync(filePath)) {
+            const defaultStates = {
+                pendingCaptcha: {},
+                pendingUpdateProfile: {},
+                pendingDeal: {},
+                pendingWithdrawal: {},
+                pendingTransactionHash: {},
+                pendingSupport: {},
+                pendingOperatorMessages: {}
+            };
+            fs.writeFileSync(filePath, JSON.stringify(defaultStates, null, 2));
+            return defaultStates;
+        }
+        return JSON.parse(fs.readFileSync(filePath));
+    } catch (err) {
+        console.error('Error loading states.json:', err.message);
+        return {
+            pendingCaptcha: {},
+            pendingUpdateProfile: {},
+            pendingDeal: {},
+            pendingWithdrawal: {},
+            pendingTransactionHash: {},
+            pendingSupport: {},
+            pendingOperatorMessages: {}
+        };
+    }
+}
+
+function clearPendingStates(states, userId) {
+    delete states.pendingDeal[userId];
+    delete states.pendingWithdrawal[userId];
+    delete states.pendingUpdateProfile[userId];
+    delete states.pendingSupport[userId];
+
+    saveJson('states', states);
+}
+
+const rateLimit = RateLimit({
+    window: 1000,
+    limit: 5,
+    onLimitExceeded: async (ctx) => {
+        try {
+            await sendBitCheckPhoto(ctx.chat.id, {
+                caption: '🚫 Слишком много запросов! Пожалуйста, попробуйте снова через несколько секунд.'
+            });
+        } catch (error) {
+            console.error('Error sending rate limit message:', error.message);
+        }
+    }
+});
 
 main_bot.use(async (ctx, next) => {
     const config = loadJson('config');
@@ -853,6 +1160,8 @@ main_bot.use(async (ctx, next) => {
     if (ctx.from && await checkIfBlocked(ctx)) return;
     await next();
 });
+
+main_bot.use(rateLimit);
 
 main_bot.use(async (ctx, next) => {
     try {
@@ -894,24 +1203,39 @@ main_bot.command('start', async ctx => {
 
     let user = users.find(u => u.id === userId);
     if (!user) {
-        const correctFruit = ['🍒', '🍏', '🥕', '🍌', '🍋', '🍐'][Math.floor(Math.random() * 6)];
-        states.pendingCaptcha[userId] = { correct: correctFruit, invitedBy, messageId: ctx.message.message_id };
-        await sendBitCheckPhoto(ctx.chat.id, {
-            caption: `👋 ${ctx.from.first_name}!\nВыбери ${correctFruit}:`,
-            reply_markup: {
-                inline_keyboard: [
-                    [{ text: '🍒', callback_data: `captcha_🍒` }, { text: '🍏', callback_data: `captcha_🍏` }, { text: '🥕', callback_data: `captcha_🥕` }],
-                    [{ text: '🍌', callback_data: `captcha_🍌` }, { text: '🍋', callback_data: `captcha_🍋` }, { text: '🍐', callback_data: `captcha_🍐` }]
-                ]
-            }
-        });
+        const captcha = await generateCaptcha();
+        const captchaMessage = await ctx.replyWithPhoto(
+            { source: Buffer.from(captcha.data) },
+            { caption: `⬆️ Введите код с картинки 🤖` }
+        );
+        states.pendingCaptcha[userId] = {
+            correct: captcha.text,
+            invitedBy,
+            messageId: captchaMessage.message_id
+        };
     } else {
         const priceBTC = await getBtcRubPrice();
         const stats = calculateUserStats(userId);
         const earningsRub = user.balance * priceBTC;
         const username = user.username ? `@${user.username}` : 'Нет';
         const referralLink = `https://t.me/${ctx.botInfo.username}?start=ref_${user.referralId}`;
-        const profileText = `👤 Твой профиль в BitCheck\n📛 Имя: ${username}\n🆔 ID: ${userId}\n\n📦 Статистика:\n🔄 Сделок совершено: ${stats.dealsCount}\n👥 Приведено рефералов: ${(user.referrals || []).length}\n💸 Реферальный заработок: ${(user.balance).toFixed(8)} BTC (~ ${earningsRub.toFixed(2)} RUB)\n\n📥 Куплено:\n₿ BTC: ${stats.boughtBTC.rub.toFixed(2)} RUB (${stats.boughtBTC.crypto.toFixed(8)} BTC)\nŁ LTC: ${stats.boughtLTC.rub.toFixed(2)} RUB (${stats.boughtLTC.crypto.toFixed(8)} LTC)\n\n📤 Продано:\n₿ BTC: ${stats.soldBTC.rub.toFixed(2)} RUB (${stats.soldBTC.crypto.toFixed(8)} BTC)\nŁ LTC: ${stats.soldLTC.rub.toFixed(2)} RUB (${stats.soldLTC.crypto.toFixed(8)} LTC)\n\n🔗 Твоя ссылка:\n👉 ${referralLink}\n💰 Приглашайте друзей и получайте бонусы!\n\n🚀 BitCheck — твой надёжный обменник для покупки и продажи Bitcoin и Litecoin!`;
+        const profileText = `👤 Твой профиль в BitCheck\n` +
+            `📛 Имя: ${username}\n` +
+            `🆔 ID: ${userId}\n\n` +
+            `📦 Статистика:\n` +
+            `🔄 Сделок совершено: ${stats.dealsCount}\n` +
+            `👥 Приведено рефералов: ${(user.referrals || []).length}\n` +
+            `💸 Реферальный заработок: ${(user.balance).toFixed(8)} BTC (~${earningsRub.toFixed(2)} RUB)\n\n` +
+            `📥 Куплено:\n` +
+            `₿ BTC: ${stats.boughtBTC.rub.toFixed(2)} RUB (${stats.boughtBTC.crypto.toFixed(8)} BTC)\n` +
+            `Ł LTC: ${stats.boughtLTC.rub.toFixed(2)} RUB (${stats.boughtLTC.crypto.toFixed(8)} LTC)\n\n` +
+            `📤 Продано:\n` +
+            `₿ BTC: ${stats.soldBTC.rub.toFixed(2)} RUB (${stats.soldBTC.crypto.toFixed(8)} BTC)\n` +
+            `Ł LTC: ${stats.soldLTC.rub.toFixed(2)} RUB (${stats.soldLTC.crypto.toFixed(8)} LTC)\n\n` +
+            `🔗 Твоя ссылка:\n` +
+            `👉 ${referralLink}\n` +
+            `💰 Приглашайте друзей и получайте бонусы!\n\n` +
+            `${POST_SCRIPT}`;
 
         await sendBitCheckPhoto(ctx.chat.id, {
             caption: profileText,
@@ -928,13 +1252,28 @@ main_bot.hears('👤 Профиль', async ctx => {
     const users = loadJson('users');
     const userId = ctx.from.id;
     const user = users.find(u => u.id === userId);
-    console.log(user)
     const priceBTC = await getBtcRubPrice();
     const stats = calculateUserStats(userId);
     const earningsRub = user.balance * priceBTC;
     const username = user.username ? `@${user.username}` : 'Нет';
     const referralLink = `https://t.me/${ctx.botInfo.username}?start=ref_${user.referralId}`;
-    const profileText = `👤 Твой профиль в BitCheck\n📛 Имя: ${username}\n🆔 ID: ${userId}\n\n📦 Статистика:\n🔄 Сделок совершено: ${stats.dealsCount}\n👥 Приведено рефералов: ${(user.referrals || []).length}\n💸 Реферальный заработок: ${(user.balance).toFixed(8)} BTC (~ ${earningsRub.toFixed(2)} RUB)\n\n📥 Куплено:\n₿ BTC: ${stats.boughtBTC.rub.toFixed(2)} RUB (${stats.boughtBTC.crypto.toFixed(8)} BTC)\nŁ LTC: ${stats.boughtLTC.rub.toFixed(2)} RUB (${stats.boughtLTC.crypto.toFixed(8)} LTC)\n\n📤 Продано:\n₿ BTC: ${stats.soldBTC.rub.toFixed(2)} RUB (${stats.soldBTC.crypto.toFixed(8)} BTC)\nŁ LTC: ${stats.soldLTC.rub.toFixed(2)} RUB (${stats.soldLTC.crypto.toFixed(8)} LTC)\n\n🔗 Твоя ссылка:\n👉 ${referralLink}\n💰 Приглашайте друзей и получайте бонусы!\n\n🚀 BitCheck — твой надёжный обменник для покупки и продажи Bitcoin и Litecoin!`;
+    const profileText = `👤 Твой профиль в BitCheck\n` +
+        `📛 Имя: ${username}\n` +
+        `🆔 ID: ${userId}\n\n` +
+        `📦 Статистика:\n` +
+        `🔄 Сделок совершено: ${stats.dealsCount}\n` +
+        `👥 Приведено рефералов: ${(user.referrals || []).length}\n` +
+        `💸 Реферальный заработок: ${(user.balance).toFixed(8)} BTC (~${earningsRub.toFixed(2)} RUB)\n\n` +
+        `📥 Куплено:\n` +
+        `₿ BTC: ${stats.boughtBTC.rub.toFixed(2)} RUB (${stats.boughtBTC.crypto.toFixed(8)} BTC)\n` +
+        `Ł LTC: ${stats.boughtLTC.rub.toFixed(2)} RUB (${stats.boughtLTC.crypto.toFixed(8)} LTC)\n\n` +
+        `📤 Продано:\n` +
+        `₿ BTC: ${stats.soldBTC.rub.toFixed(2)} RUB (${stats.soldBTC.crypto.toFixed(8)} BTC)\n` +
+        `Ł LTC: ${stats.soldLTC.rub.toFixed(2)} RUB (${stats.soldLTC.crypto.toFixed(8)} LTC)\n\n` +
+        `🔗 Твоя ссылка:\n` +
+        `👉 ${referralLink}\n` +
+        `💰 Приглашайте друзей и получайте бонусы!\n\n` +
+        `${POST_SCRIPT}`;
 
     await sendBitCheckPhoto(ctx.chat.id, {
         caption: profileText,
@@ -949,14 +1288,14 @@ main_bot.hears('👤 Профиль', async ctx => {
 main_bot.hears('💬 Отзывы', async ctx => {
     await sendBitCheckPhoto(ctx.chat.id, {
         caption: '📝 Отзывы BitCheck',
-        reply_markup: { inline_keyboard: [[{ text: 'Группа 📣', url: 'https://t.me/bitcheck_ot' }]] }
+        reply_markup: { inline_keyboard: [[{ text: 'Группа 📣', url: `${BIT_CHECK_GROUP_URL}` }]] }
     });
 });
 
 main_bot.hears('💬 Чат', async ctx => {
     await sendBitCheckPhoto(ctx.chat.id, {
         caption: '💬 Чат BitCheck',
-        reply_markup: { inline_keyboard: [[{ text: 'Перейти в чат 🚪', url: 'https://t.me/BitCheck01' }]] }
+        reply_markup: { inline_keyboard: [[{ text: 'Перейти в чат 🚪', url: `${BIT_CHECK_CHAT_URL}` }]] }
     });
 });
 
@@ -968,12 +1307,17 @@ main_bot.hears('🤝 Партнёрство', async ctx => {
     const referralLink = `https://t.me/${ctx.botInfo.username}?start=ref_${user.referralId}`;
     const priceBTC = await getBtcRubPrice();
     const earningsRub = user.balance * priceBTC;
-    const text = `🤝 Реферальная программа\n🔗 ${referralLink}\n👥 Приглашено: ${(user.referrals || []).length}\n💰 Заработано: ${earningsRub.toFixed(2)} RUB (~${(user.balance || 0).toFixed(8)} BTC)\n${Date.now() - lastPriceUpdate > CACHE_DURATION ? '⚠️ Курс может быть устаревшим' : ''}`;
+    const text = `🤝 Реферальная программа\n` +
+        `🔗 ${referralLink}\n` +
+        `👥 Приглашено: ${(user.referrals || []).length}\n` +
+        `💰 Заработано: ${earningsRub.toFixed(2)} RUB (~${(user.balance || 0).toFixed(8)} BTC)\n` +
+        `${Date.now() - lastPriceUpdate > CACHE_DURATION ? '⚠️ Курс может быть устаревшим' : ''}`;
+
     const message = await sendBitCheckPhoto(ctx.chat.id, {
         caption: text,
         reply_markup: {
             inline_keyboard: [
-                [{ text: '📤 Поделиться', switch_inline_query: `Присоединяйся! ${referralLink}` }],
+                [{ text: '📤 Поделиться', switch_inline_query: `\n\n💎 Присоединяйся к BitCheck по ссылке ниже! ⬇️\n${referralLink}` }],
                 [{ text: '💸 Вывести', callback_data: 'withdraw_referral' }]
             ]
         }
@@ -993,13 +1337,15 @@ main_bot.hears('💰 Купить', async ctx => {
     }
     const priceBTC = await getBtcRubPrice();
     const priceLTC = await getLtcRubPrice();
-    const minBTCAmount = (config.minBuyAmountRubBTC / priceBTC).toFixed(8);
+    const minBuyAmountRubBTC = config.processingStatus ? 1000 : config.minBuyAmountRubBTC;
+    const minBuyAmountRubLTC = config.processingStatus ? 1000 : config.minBuyAmountRubLTC;
+    const minBTCAmount = (minBuyAmountRubBTC / priceBTC).toFixed(8);
     const maxBTCAmount = (config.maxBuyAmountRubBTC / priceBTC).toFixed(8);
-    const minLTCAmount = (config.minBuyAmountRubLTC / priceLTC).toFixed(8);
+    const minLTCAmount = (minBuyAmountRubLTC / priceLTC).toFixed(8);
     const maxLTCAmount = (config.maxBuyAmountRubLTC / priceLTC).toFixed(8);
     states.pendingDeal[ctx.from.id] = {type: "buy"}
     const message = await sendBitCheckPhoto(ctx.chat.id, {
-        caption: `💰 Выберите валюту:\n💵 BTC\nМин: ${config.minBuyAmountRubBTC} RUB (~${minBTCAmount} BTC)\nМакс: ${config.maxBuyAmountRubBTC} RUB (~${maxBTCAmount} BTC)\n💵 LTC\nМин: ${config.minBuyAmountRubLTC} RUB (~${minLTCAmount} LTC)\nМакс: ${config.maxBuyAmountRubLTC} RUB (~${maxLTCAmount} LTC)\n${Date.now() - lastPriceUpdate > CACHE_DURATION ? '⚠️ Курс может быть устаревшим' : ''}`,
+        caption: `💰 Выберите валюту:\n💵 BTC\nМин: ${minBuyAmountRubBTC} RUB (~${minBTCAmount} BTC)\nМакс: ${config.maxBuyAmountRubBTC} RUB (~${maxBTCAmount} BTC)\n💵 LTC\nМин: ${minBuyAmountRubLTC} RUB (~${minLTCAmount} LTC)\nМакс: ${config.maxBuyAmountRubLTC} RUB (~${maxLTCAmount} LTC)\n${Date.now() - lastPriceUpdate > CACHE_DURATION ? '⚠️ Курс может быть устаревшим' : ''}`,
         reply_markup: {
             inline_keyboard: [
                 [{ text: 'BTC', callback_data: 'buy_select_btc' }],
@@ -1064,6 +1410,99 @@ main_bot.on('message', async ctx => {
     const id = ctx.from.id;
     const user = users.find(u => u.id === id);
     if (user && user.isBlocked) return;
+
+    if (states.pendingCaptcha[id] && ctx.message.text) {
+        const captchaData = states.pendingCaptcha[id];
+        const userInput = ctx.message.text.trim().toUpperCase();
+        const correctCaptcha = captchaData.correct.toUpperCase();
+
+        try {
+            await ctx.deleteMessage(captchaData.messageId);
+        } catch (error) {
+            console.error(`Error deleting CAPTCHA message:`, error.message);
+        }
+
+        if (userInput === correctCaptcha) {
+            const invitedBy = captchaData.invitedBy;
+            let user = users.find(u => u.id === id);
+            if (!user) {
+                if (invitedBy) {
+                    const referrer = users.find(u => u.id === invitedBy);
+                    if (referrer && !referrer.referrals.includes(id)) {
+                        referrer.referrals = referrer.referrals || [];
+                        referrer.referrals.push(id);
+                        try {
+                            await sendBitCheckPhoto(referrer.id, { caption: `👥 ${ctx.from.first_name || 'Пользователь'} приглашён!` });
+                        } catch (error) {
+                            console.error(`Error sending notification to referrer ${referrer.id}:`, error.message);
+                        }
+                    }
+                }
+                user = {
+                    id: id,
+                    username: ctx.from.username || '',
+                    first_name: ctx.from.first_name || '',
+                    last_name: ctx.from.last_name || '',
+                    referralId: Date.now().toString(),
+                    referrals: [],
+                    balance: 0,
+                    isBlocked: false,
+                    registrationDate: new Date().toISOString(),
+                    defaultWalletsBTC: [],
+                    defaultWalletsLTC: [],
+                    defaultRequisites: []
+                };
+                users.push(user);
+            }
+            delete states.pendingCaptcha[id];
+            await ctx.reply('✅ Капча пройдена!');
+
+            const priceBTC = await getBtcRubPrice();
+            const stats = calculateUserStats(id);
+            const earningsRub = user.balance * priceBTC;
+            const username = user.username ? `@${user.username}` : 'Нет';
+            const referralLink = `https://t.me/${ctx.botInfo.username}?start=ref_${user.referralId}`;
+            const profileText = `👤 Твой профиль в BitCheck\n` +
+                `📛 Имя: ${username}\n` +
+                `🆔 ID: ${id}\n\n` +
+                `📦 Статистика:\n` +
+                `🔄 Сделок совершено: ${stats.dealsCount}\n` +
+                `👥 Приведено рефералов: ${(user.referrals || []).length}\n` +
+                `💸 Реферальный заработок: ${(user.balance).toFixed(8)} BTC (~${earningsRub.toFixed(2)} RUB)\n\n` +
+                `📥 Куплено:\n` +
+                `₿ BTC: ${stats.boughtBTC.rub.toFixed(2)} RUB (${stats.boughtBTC.crypto.toFixed(8)} BTC)\n` +
+                `Ł LTC: ${stats.boughtLTC.rub.toFixed(2)} RUB (${stats.boughtLTC.crypto.toFixed(8)} LTC)\n\n` +
+                `📤 Продано:\n` +
+                `₿ BTC: ${stats.soldBTC.rub.toFixed(2)} RUB (${stats.soldBTC.crypto.toFixed(8)} BTC)\n` +
+                `Ł LTC: ${stats.soldLTC.rub.toFixed(2)} RUB (${stats.soldLTC.crypto.toFixed(8)} LTC)\n\n` +
+                `🔗 Твоя ссылка:\n` +
+                `👉 ${referralLink}\n` +
+                `💰 Приглашайте друзей и получайте бонусы!\n\n` +
+                `${POST_SCRIPT}`;
+            await sendBitCheckPhoto(ctx.chat.id, {
+                caption: profileText,
+                reply_markup: {
+                    keyboard: [['💰 Купить', '💸 Продать'], ['👤 Профиль', '🤝 Партнёрство'], ['💬 Чат', '💬 Отзывы'], ['🆘 Поддержка']],
+                    resize_keyboard: true
+                }
+            });
+            saveJson('users', users);
+            saveJson('states', states);
+        } else {
+            const captcha = await generateCaptcha();
+            const captchaMessage = await ctx.replyWithPhoto(
+                { source: Buffer.from(captcha.data) },
+                { caption: `❌ Неверный код, попробуйте снова! Введите код с картинки 🤖` }
+            );
+            states.pendingCaptcha[id] = {
+                correct: captcha.text,
+                invitedBy: captchaData.invitedBy,
+                messageId: captchaMessage.message_id
+            };
+            saveJson('states', states);
+        }
+        return;
+    }
 
     if (users.find(u => u.id === id)) {
         if (states.pendingUpdateProfile[id] && states.pendingUpdateProfile[id].type.startsWith('add_')) {
@@ -1174,6 +1613,39 @@ main_bot.on('message', async ctx => {
             return;
         }
 
+        if (states.pendingTransactionHash[ctx.from.id]) {
+            const transactionHash = ctx.message.text;
+            const dealId = states.pendingTransactionHash[ctx.from.id].dealId;
+            const deals = loadJson('deals');
+            const dealIndex = deals.findIndex(d => d.id === dealId);
+            if (dealIndex === -1) {
+                await ctx.reply('❌ Заявка не найдена или уже обработана');
+                delete states.pendingTransactionHash[ctx.from.id];
+                saveJson('states', states);
+                return;
+            }
+            const deal = deals[dealIndex];
+            try {
+                await sendBitCheckPhoto(deal.userId, {
+                    caption: `✅ Сделка № ${deal.id} завершена!\n` +
+                        `Покупка ${deal.currency}\n` +
+                        `Количество: ${deal.cryptoAmount} ${deal.currency}\n\n` +
+                        `🔗 Хеш транзакции:\n<code>${transactionHash}</code>`,
+                    parse_mode: 'HTML'
+                });
+                deal.status = 'completed';
+                deal.transactionHash = transactionHash;
+                deals[dealIndex] = deal;
+                delete states.pendingTransactionHash[ctx.from.id];
+                saveJson('deals', deals);
+                saveJson('states', states);
+                await ctx.reply('✅ Хеш транзакции успешно отправлен пользователю');
+            } catch (error) {
+                console.error('Error sending transaction hash:', error.message);
+                await ctx.reply('❌ Ошибка при отправке хеша транзакции');
+            }
+        }
+
         if (states.pendingDeal[id] && states.pendingDeal[id].newWallet) {
             const dealData = states.pendingDeal[id]
             const isBuy = dealData.type === 'buy'
@@ -1232,7 +1704,9 @@ main_bot.on('message', async ctx => {
                     console.error(`Error deleting message ${states.pendingDeal[id].messageId}:`, error.message)
                 }
 
-                const caption = isBuy ? `💼 Выберите кошелёк для <b>${dealData.currency}</b>:\n${wallets.map((wallet, index) => `${index + 1}) <code>${wallet}</code>`).join('\n')}` : `💼 Выберите реквизиты для продажи ${dealData.currency}:\n${wallets.map((wallet, index) => `${index + 1}) ${wallet}`).join('\n')}`
+                const caption = isBuy
+                    ? `💼 Выберите кошелёк для покупки <b>${currency}</b>:\n\n${wallets.map((wallet, index) => `${index + 1}) <code>${wallet}</code>`).join('\n')}`
+                    : `💼 Выберите реквизиты для продажи <b>${currency}</b>:\n\n${wallets.map((wallet, index) => `${index + 1}) <code>${wallet}</code>`).join('\n')}`;
                 const message = await sendBitCheckPhoto(ctx.chat.id, {
                     caption,
                     reply_markup: {
@@ -1271,12 +1745,10 @@ main_bot.on('message', async ctx => {
             const isBuy = dealData.type === 'buy'
             const currency = dealData.currency
             const price = currency === 'BTC' ? await getBtcRubPrice() : await getLtcRubPrice()
-            const minAmountRub = currency === 'BTC' ? (isBuy ? config.minBuyAmountRubBTC : config.minSellAmountRubBTC) : (isBuy ? config.minBuyAmountRubLTC : config.minSellAmountRubLTC)
+            const minAmountRub = isBuy ? (config.processingStatus ? 1000 : (currency === 'BTC' ? config.minBuyAmountRubBTC : config.minBuyAmountRubLTC)) : (currency === 'BTC' ? config.minSellAmountRubBTC : config.minSellAmountRubLTC)
             const maxAmountRub = currency === 'BTC' ? (isBuy ? config.maxBuyAmountRubBTC : config.maxSellAmountRubBTC) : (isBuy ? config.maxBuyAmountRubLTC : config.maxSellAmountRubLTC)
-            const minBTCAmount = (currency === 'BTC' ? minAmountRub : config.minBuyAmountRubBTC / await getBtcRubPrice()).toFixed(8)
-            const maxBTCAmount = (currency === 'BTC' ? maxAmountRub : config.maxBuyAmountRubBTC / await getBtcRubPrice()).toFixed(8)
-            const minLTCAmount = (currency === 'LTC' ? minAmountRub : config.minBuyAmountRubLTC / await getLtcRubPrice()).toFixed(8)
-            const maxLTCAmount = (currency === 'LTC' ? maxAmountRub : config.maxBuyAmountRubLTC / await getLtcRubPrice()).toFixed(8)
+            const minAmountCrypto = (minAmountRub / price).toFixed(8)
+            const maxAmountCrypto = (maxAmountRub / price).toFixed(8)
 
             const inputValue = parseFloat(input)
             if (isNaN(inputValue) || inputValue <= 0) {
@@ -1286,7 +1758,10 @@ main_bot.on('message', async ctx => {
                     console.error(`Error deleting message ${states.pendingDeal[id].messageId}:`, error.message)
                 }
                 const message = await sendBitCheckPhoto(ctx.chat.id, {
-                    caption: `❌ Введите корректную сумму в RUB или ${currency}`
+                    caption: `❌ Введите корректную сумму в RUB или ${currency}\n\n💰 Введите сумму для ${isBuy ? 'покупки' : 'продажи'} ${currency} (в RUB или ${currency})\nМин: ${minAmountRub} RUB (~${minAmountCrypto} ${currency})\nМакс: ${maxAmountRub} RUB (~${maxAmountCrypto} ${currency})`,
+                    reply_markup: {
+                        inline_keyboard: [[{ text: '❌ Отменить', callback_data: 'cancel_action' }]]
+                    }
                 })
                 states.pendingDeal[id].messageId = message.message_id
                 saveJson('states', states)
@@ -1322,10 +1797,12 @@ main_bot.on('message', async ctx => {
                     console.error(`Error deleting message ${states.pendingDeal[id].messageId}:`, error.message)
                 }
                 const message = await sendBitCheckPhoto(ctx.chat.id, {
-                    caption: `Мин: ${minAmountRub} RUB (~${minBTCAmount} BTC, ~${minLTCAmount} LTC)\nМакс: ${maxAmountRub} RUB (~${maxBTCAmount} BTC, ~${maxLTCAmount} LTC)`
+                    caption: `❌ Сумма вне допустимого диапазона!\n\n💰 Введите сумму для ${isBuy ? 'покупки' : 'продажи'} ${currency} (в RUB или ${currency})\nМин: ${minAmountRub} RUB (~${minAmountCrypto} ${currency})\nМакс: ${maxAmountRub} RUB (~${maxAmountCrypto} ${currency})`,
+                    reply_markup: {
+                        inline_keyboard: [[{ text: '❌ Отменить', callback_data: 'cancel_action' }]]
+                    }
                 })
                 states.pendingDeal[id].messageId = message.message_id
-                clearPendingStates(states, id)
                 saveJson('states', states)
                 return
             }
@@ -1340,7 +1817,9 @@ main_bot.on('message', async ctx => {
             dealData.rubBefore = rubBefore
 
             if (wallets.length > 0) {
-                const caption = isBuy ? `💼 Выберите кошелёк для <b>${currency}</b>:\n${wallets.map((wallet, index) => `${index + 1}) <code>${wallet}</code>`).join('\n')}` : `💼 Выберите реквизиты для продажи ${currency}:\n${wallets.map((wallet, index) => `${index + 1}) ${wallet}`).join('\n')}`
+                const caption = isBuy
+                    ? `💼 Выберите кошелёк для покупки <b>${currency}</b>:\n\n${wallets.map((wallet, index) => `${index + 1}) <code>${wallet}</code>`).join('\n')}`
+                    : `💼 Выберите реквизиты для продажи <b>${currency}</b>:\n\n${wallets.map((wallet, index) => `${index + 1}) <code>${wallet}</code>`).join('\n')}`;
                 const message = await sendBitCheckPhoto(ctx.chat.id, {
                     caption,
                     reply_markup: {
@@ -1536,7 +2015,6 @@ main_bot.on('callback_query', async ctx => {
             return;
         }
 
-        const users = loadJson('users');
         const deals = loadJson('deals');
         const withdrawals = loadJson('withdrawals');
 
@@ -1553,7 +2031,7 @@ main_bot.on('callback_query', async ctx => {
             try {
                 await ctx.telegram.sendDocument(from, {
                     source: outputPath,
-                    filename: `raffle_results_${raffle.id}.txt`
+                    filename: `Результаты розыгрыша №${raffle.id}.txt`
                 });
                 await ctx.answerCbQuery('✅ Результаты отправлены', { show_alert: false });
             } catch (error) {
@@ -1983,12 +2461,12 @@ main_bot.on('callback_query', async ctx => {
                 console.error(`Error deleting message ${withdrawData.messageId}:`, error.message);
             }
 
-            const contactUrl = getContactUrl('BTC');
+            const operatorContactUrl = getOperatorContactUrl('BTC');
             const message = await sendBitCheckPhoto(ctx.chat.id, {
                 caption: `✅ Заявка на вывод рефералов создана! № ${withdrawal.id}\nКоличество: ${withdrawal.cryptoAmount.toFixed(8)} BTC (~${withdrawal.rubAmount.toFixed(2)} RUB)\nКошелёк: <code>${withdrawal.walletAddress}</code>`,
                 reply_markup: {
                     inline_keyboard: [
-                        [{ text: '📞 Написать оператору', url: contactUrl }]
+                        [{ text: '📞 Написать оператору', url: operatorContactUrl }]
                     ]
                 },
                 parse_mode: 'HTML'
@@ -2021,95 +2499,6 @@ main_bot.on('callback_query', async ctx => {
             saveJson('states', states);
             saveJson('users', users);
             await ctx.answerCbQuery(isYes ? '✅ Кошелёк сохранён как постоянный' : '✅ Кошелёк не сохранён', { show_alert: false });
-            return;
-        }
-
-        if (data.startsWith('captcha_')) {
-            const states = loadStates();
-            const selectedFruit = data.split('_')[1];
-            const captchaData = states.pendingCaptcha[from];
-
-            try {
-                await ctx.deleteMessage(ctx.callbackQuery.message.message_id);
-            } catch (error) {
-                console.error(`Error deleting captcha message:`, error.message);
-            }
-
-            if (!captchaData) {
-                await ctx.answerCbQuery('❌ Капча истекла. Используйте /start', { show_alert: false });
-                return;
-            }
-
-            if (selectedFruit === captchaData.correct) {
-                const invitedBy = captchaData.invitedBy;
-                let user = users.find(u => u.id === from);
-
-                if (!user) {
-                    if (invitedBy) {
-                        const referrer = users.find(u => u.id === invitedBy);
-                        if (referrer && !referrer.referrals.includes(from)) {
-                            referrer.referrals = referrer.referrals || [];
-                            referrer.referrals.push(from);
-                            try {
-                                await sendBitCheckPhoto(referrer.id, { caption: `👥 ${ctx.from.first_name || 'Пользователь'} приглашён!` });
-                            } catch (error) {
-                                console.error(`Error sending notification to referrer ${referrer.id}:`, error.message);
-                            }
-                        }
-                    }
-
-                    user = {
-                        id: from,
-                        username: ctx.from.username || '',
-                        first_name: ctx.from.first_name || '',
-                        last_name: ctx.from.last_name || '',
-                        referralId: Date.now().toString(),
-                        referrals: [],
-                        balance: 0,
-                        isBlocked: false,
-                        registrationDate: new Date().toISOString(),
-                        defaultWalletsBTC: [],
-                        defaultWalletsLTC: [],
-                        defaultRequisites: []
-                    };
-                    users.push(user);
-                }
-
-                delete states.pendingCaptcha[from];
-
-                const priceBTC = await getBtcRubPrice();
-                const stats = calculateUserStats(from);
-                const earningsRub = user.balance * priceBTC;
-                const username = user.username ? `@${user.username}` : 'Нет';
-                const referralLink = `https://t.me/${ctx.botInfo.username}?start=ref_${user.referralId}`;
-                const profileText = `👤 Твой профиль в BitCheck\n📛 Имя: ${username}\n🆔 ID: ${from}\n\n📦 Статистика:\n🔄 Сделок совершено: ${stats.dealsCount}\n👥 Приведено рефералов: ${(user.referrals || []).length}\n💸 Реферальный заработок: ${(user.balance).toFixed(8)} BTC (~ ${earningsRub.toFixed(2)} RUB)\n\n📥 Куплено:\n💵 BTC: ${stats.boughtBTC.rub.toFixed(2)} RUB (${stats.boughtBTC.crypto.toFixed(8)} BTC)\nŁ LTC: ${stats.boughtLTC.rub.toFixed(2)} RUB (${stats.boughtLTC.crypto.toFixed(8)} LTC)\n\n📤 Продано:\n💵 BTC: ${stats.soldBTC.rub.toFixed(2)} RUB (${stats.soldBTC.crypto.toFixed(8)} BTC)\nŁ LTC: ${stats.soldLTC.rub.toFixed(2)} RUB (${stats.soldLTC.crypto.toFixed(8)} LTC)\n\n🔗 Твоя ссылка:\n👉 ${referralLink}\n💰 Приглашайте друзей и получайте бонусы!\n\n🚀 BitCheck — твой надёжный обменник для покупки и продажи Bitcoin и Litecoin!`;
-
-                await sendBitCheckPhoto(ctx.chat.id, {
-                    caption: profileText,
-                    reply_markup: {
-                        keyboard: [['💰 Купить', '💸 Продать'], ['👤 Профиль', '🤝 Партнёрство'], ['💬 Чат', '💬 Отзывы'], ['🆘 Поддержка']],
-                        resize_keyboard: true
-                    }
-                });
-                await ctx.answerCbQuery('✅ Капча пройдена', { show_alert: false });
-
-                saveJson('users', users);
-                saveJson('states', states);
-            } else {
-                const correctFruit = ['🍒', '🍏', '🥕', '🍌', '🍋', '🍐'][Math.floor(Math.random() * 6)];
-                states.pendingCaptcha[from] = { correct: correctFruit, invitedBy: captchaData.invitedBy };
-                await sendBitCheckPhoto(ctx.chat.id, {
-                    caption: `👋 ${ctx.from.first_name}!\nВыбери ${correctFruit}:`,
-                    reply_markup: {
-                        inline_keyboard: [
-                            [{ text: '🍒', callback_data: `captcha_🍒` }, { text: '🍏', callback_data: `captcha_🍏` }, { text: '🥕', callback_data: `captcha_🥕` }],
-                            [{ text: '🍌', callback_data: `captcha_🍌` }, { text: '🍋', callback_data: `captcha_🍋` }, { text: '🍐', callback_data: `captcha_🍐` }]
-                        ]
-                    }
-                });
-                await ctx.answerCbQuery('❌ Неверный выбор, попробуйте снова', { show_alert: false });
-            }
-            saveJson('states', states);
             return;
         }
 
@@ -2235,7 +2624,7 @@ main_bot.on('callback_query', async ctx => {
             states.pendingDeal[from].currency = currency;
 
             const config = loadJson('config');
-            const minAmountRub = currency === 'BTC' ? config.minBuyAmountRubBTC : config.minBuyAmountRubLTC;
+            const minAmountRub = config.processingStatus ? 1000 : (currency === 'BTC' ? config.minBuyAmountRubBTC : config.minBuyAmountRubLTC);
             const maxAmountRub = currency === 'BTC' ? config.maxBuyAmountRubBTC : config.maxBuyAmountRubLTC;
             const price = currency === 'BTC' ? await getBtcRubPrice() : await getLtcRubPrice();
             const minAmountCrypto = (minAmountRub / price).toFixed(8);
@@ -2243,7 +2632,7 @@ main_bot.on('callback_query', async ctx => {
 
             if (states.pendingDeal[from].messageId) {
                 await ctx.deleteMessage(states.pendingDeal[from].messageId).catch(error => {
-                    console.error(`Ошибка удаления сообщения ${states.pendingDeal[from].messageId}:`, error.message);
+                    console.error(`Error deleting message ${states.pendingDeal[from].messageId}:`, error.message);
                 });
             }
 
@@ -2264,7 +2653,7 @@ main_bot.on('callback_query', async ctx => {
             const dealData = states.pendingDeal[from];
 
             if (!dealData || !dealData.currency) {
-                console.error(`Некорректные или отсутствующие данные для пользователя ${from}`);
+                console.error(`Invalid or missing data for user ${from}`);
                 await ctx.answerCbQuery('❌ Ошибка: некорректные данные', { show_alert: true });
                 return;
             }
@@ -2273,7 +2662,7 @@ main_bot.on('callback_query', async ctx => {
             const walletType = isBuy ? `defaultWallets${dealData.currency}` : 'defaultRequisites';
 
             await ctx.deleteMessage(dealData.messageId).catch(error => {
-                console.error(`Ошибка удаления сообщения ${dealData.messageId}:`, error.message);
+                console.error(`Error deleting message ${dealData.messageId}:`, error.message);
             });
 
             const message = await sendBitCheckPhoto(ctx.chat.id, {
@@ -2304,15 +2693,44 @@ main_bot.on('callback_query', async ctx => {
 
             const config = loadJson('config');
             const users = loadJson('users');
+            const deals = loadJson('deals');
             const user = users.find(u => u.id === from);
             if (user && user.isBlocked) return;
 
             const rubBefore = dealData.rubBefore || 0;
             const rub = dealData.rub || 0;
-            const commission = dealData.commission || 0;
+            const baseCommission = dealData.commission || 0;
             const amount = dealData.amount || 0;
             const discount = await getCommissionDiscount(from);
             const priorityPrice = priority === 'elevated' ? config.priorityPriceRub : 0;
+
+            const now = new Date();
+            const currentMonth = now.getMonth();
+            const currentYear = now.getFullYear();
+            const monthlyCompletedDeals = deals.filter(deal =>
+                deal.userId === from &&
+                deal.status === 'completed' &&
+                new Date(deal.timestamp).getMonth() === currentMonth &&
+                new Date(deal.timestamp).getFullYear() === currentYear
+            ).length;
+
+            const isTenthDeal = monthlyCompletedDeals % 10 === 9;
+
+            let total;
+            let adjustedCommission;
+            if (isTenthDeal) {
+                adjustedCommission = 0;
+                const rawTotal = dealData.type === 'sell' ? rubBefore - priorityPrice : rub + priorityPrice;
+                total = Math.ceil(rawTotal / 50) * 50;
+            } else {
+                const rawTotal = dealData.type === 'sell'
+                    ? rubBefore - baseCommission - priorityPrice
+                    : rub + baseCommission + priorityPrice;
+                total = Math.ceil(rawTotal / 50) * 50;
+                adjustedCommission = dealData.type === 'sell'
+                    ? Number((rubBefore - total - priorityPrice))
+                    : Number((total - rub - priorityPrice));
+            }
 
             const deal = {
                 id: Date.now().toString(),
@@ -2322,20 +2740,43 @@ main_bot.on('callback_query', async ctx => {
                 currency: dealData.currency,
                 rubAmount: dealData.type === 'sell' ? Number(rubBefore.toFixed(2)) : Number(rub.toFixed(2)),
                 cryptoAmount: Number(amount.toFixed(8)),
-                commission: Number(commission.toFixed(2)),
-                total: dealData.type === 'sell'
-                    ? Number((rubBefore - commission - (priority === 'elevated' ? priorityPrice : 0)).toFixed(2))
-                    : Number((rub + commission + priorityPrice).toFixed(2)),
+                commission: Number(adjustedCommission.toFixed(2)),
+                total: Number(total.toFixed(2)),
                 walletAddress: dealData.wallet,
                 status: 'draft',
                 priority: priority,
+                processingStatus: config.processingStatus,
                 timestamp: new Date().toISOString(),
+                isTenthDeal: isTenthDeal
             };
 
             try {
                 await ctx.deleteMessage(dealData.messageId);
             } catch (error) {
-                console.error(`Ошибка удаления сообщения ${dealData.messageId}:`, error.message);
+                console.error(`Error deleting message ${dealData.messageId}:`, error.message);
+            }
+
+            if (config.processingStatus) {
+                const message = await sendBitCheckPhoto(ctx.chat.id, {
+                    caption: '💸 Выберите способ оплаты:\nКарта - от 1000₽\nРеквизиты BitCheck - могут отсутствовать',
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: 'Карта', callback_data: 'select_payment_method_card' }, { text: 'Реквизиты BitCheck', callback_data: 'select_bitcheck-requisites' }],
+                            [{ text: '❌ Отменить', callback_data: `cancel_deal_${deal.id}` }]
+                        ]
+                    }
+                });
+                states.pendingDeal[from].messageId = message.message_id;
+                states.pendingDeal[from].dealId = deal.id;
+                states.pendingDeal[from].priority = priority;
+                deals.push(deal);
+                delete dealData.action;
+                delete dealData.walletType;
+                delete dealData.newWallet;
+                saveJson('states', states);
+                saveJson('deals', deals);
+                await ctx.answerCbQuery(`✅ Выбран приоритет: ${priority === 'elevated' ? 'Повышенный' : 'Обычный'}`, { show_alert: false });
+                return;
             }
 
             const actionText = dealData.type === 'buy' ? 'покупки' : 'продажи';
@@ -2344,7 +2785,7 @@ main_bot.on('callback_query', async ctx => {
                 caption: `✅ Подтверждение ${actionText} ${deal.currency}\n` +
                     `Количество: ${deal.cryptoAmount} ${deal.currency}\n` +
                     `Сумма: ${deal.rubAmount} RUB\n` +
-                    `Комиссия: ${deal.commission} RUB (скидка ${discount}%)\n` +
+                    `Комиссия: ${deal.commission} RUB${isTenthDeal ? ' (бесплатная сделка, 10-я по счёту!)' : ` (скидка ${discount.toFixed(2)}%)`}\n` +
                     `Приоритет: ${deal.priority === 'elevated' ? `Повышенный (+${priorityPrice} RUB)` : 'Обычный'}\n` +
                     `Итог: ${deal.total} RUB\n` +
                     `${paymentTarget}: <code>${deal.walletAddress}</code>`,
@@ -2368,9 +2809,224 @@ main_bot.on('callback_query', async ctx => {
             return;
         }
 
+        if (data === 'select_payment_method_card') {
+            const states = loadJson('states');
+
+            const dealData = states.pendingDeal[from];
+            const deal = deals.find(d => d.id === dealData.dealId);
+            const config = loadJson('config');
+            const discount = await getCommissionDiscount(from);
+            const priorityPrice = deal.priority === 'elevated' ? config.priorityPriceRub : 0;
+            const actionText = deal.type === 'buy' ? 'покупки' : 'продажи';
+            const paymentTarget = deal.type === 'buy' ? 'Кошелёк' : 'Реквизиты';
+
+            try {
+                const paymentDetails = await getMerchantPaymentDetails(
+                    deal.total,
+                    from,
+                    MERCHANT_API_KEY,
+                );
+
+                const paymentVariants = await getAvailablePaymentVariants(
+                    paymentDetails.id,
+                    MERCHANT_API_KEY,
+                );
+
+                if (!paymentVariants || paymentVariants.length === 0) {
+                    try {
+                        await ctx.deleteMessage(dealData.messageId);
+                    } catch (error) {
+                        console.error(`Error deleting message ${dealData.messageId}:`, error.message);
+                    }
+
+                    const operatorContactUrl = getOperatorContactUrl(deal.currency);
+                    const message = await sendBitCheckPhoto(ctx.chat.id, {
+                        caption: `❌ Не удалось найти доступные варианты оплаты для карты!\n` +
+                            `Заявка № ${deal.id}\n` +
+                            `Покупка ${deal.currency}\n` +
+                            `Количество: ${deal.cryptoAmount} ${deal.currency}\n` +
+                            `Сумма: ${deal.rubAmount} RUB\n` +
+                            `Комиссия: ${deal.commission} RUB (скидка ${discount.toFixed(2)}%)\n` +
+                            `Приоритет: ${deal.priority === 'elevated' ? `Повышенный (+${priorityPrice} RUB)` : 'Обычный'}\n` +
+                            `Итог: ${deal.total} RUB\n` +
+                            `${paymentTarget}: <code>${deal.walletAddress}</code>\n\n` +
+                            `‼️ Пожалуйста, свяжитесь с оператором для решения проблемы.`,
+                        reply_markup: {
+                            inline_keyboard: [
+                                [{ text: '📞 Написать оператору', url: operatorContactUrl }],
+                                [{ text: '❌ Отменить заявку', callback_data: `cancel_deal_${deal.id}` }]
+                            ]
+                        },
+                        parse_mode: 'HTML'
+                    });
+
+                    states.pendingDeal[from].messageId = message.message_id;
+                    saveJson('states', states);
+                    await ctx.answerCbQuery('❌ Нет доступных вариантов оплаты', { show_alert: true });
+                    return;
+                }
+
+                const paymentButtons = paymentVariants.map(variant => [{
+                    text: variant.method.charAt(0).toUpperCase() + variant.method.slice(1),
+                    callback_data: `select_payment_variant_${variant.method}_${variant.option || ''}_${deal.id}`
+                }]);
+
+                paymentButtons.push([{ text: '❌ Отменить', callback_data: `cancel_deal_${deal.id}` }]);
+
+                try {
+                    await ctx.deleteMessage(dealData.messageId);
+                } catch (error) {
+                    console.error(`Error deleting message ${dealData.messageId}:`, error.message);
+                }
+
+                const message = await sendBitCheckPhoto(ctx.chat.id, {
+                    caption: `✅ Подтверждение ${actionText} ${deal.currency}\n` +
+                        `Количество: ${deal.cryptoAmount} ${deal.currency}\n` +
+                        `Сумма: ${deal.rubAmount} RUB\n` +
+                        `Комиссия: ${deal.commission} RUB (скидка ${discount.toFixed(2)}%)\n` +
+                        `Приоритет: ${deal.priority === 'elevated' ? `Повышенный (+${priorityPrice} RUB)` : 'Обычный'}\n` +
+                        `Платёжная система: Карта\n` +
+                        `Итог: ${deal.total} RUB\n` +
+                        `${paymentTarget}: <code>${deal.walletAddress}</code>\n\n` +
+                        `Выберите вариант оплаты:`,
+                    reply_markup: {
+                        inline_keyboard: paymentButtons
+                    },
+                    parse_mode: 'HTML'
+                });
+
+                states.pendingDeal[from].messageId = message.message_id;
+                states.pendingDeal[from].paymentDetailsId = paymentDetails.id;
+                states.pendingDeal[from].paymentInternalId = paymentDetails.internalId;
+                saveJson('states', states);
+                await ctx.answerCbQuery('✅ Выбрана платёжная система: Карта', { show_alert: false });
+                return;
+            } catch (error) {
+                console.error(`Error processing payment variants:`, error.message);
+                await ctx.answerCbQuery('❌ Ошибка при получении вариантов оплаты', { show_alert: true });
+                return;
+            }
+        }
+
+        if (data.startsWith('select_payment_variant_')) {
+            const parts = data.split('_');
+            const variantMethod = parts[3];
+            const dealId = parts[parts.length - 1];
+            const variantOption = parts.length >= 6 ? (parts[4] || '') : '';
+            
+            const states = loadJson('states');
+            const deals = loadJson('deals');
+            let deal = deals.find(d => d.id === dealId);
+            const dealData = states.pendingDeal[from];
+            
+            if (!deal && dealData && dealData.dealId === dealId) {
+                deal = {
+                    id: dealId,
+                    userId: from,
+                    type: dealData.type,
+                    currency: dealData.currency,
+                    rubAmount: dealData.rub,
+                    cryptoAmount: dealData.amount,
+                    commission: dealData.commission,
+                    total: dealData.total,
+                    walletAddress: dealData.wallet,
+                    priority: dealData.priority || 'normal',
+                    processingStatus: true
+                };
+            }
+            
+            if (!deal) {
+                await ctx.answerCbQuery('❌ Заявка не найдена', { show_alert: true });
+                return;
+            }
+            
+            const config = loadJson('config');
+            const discount = await getCommissionDiscount(from);
+            const priorityPrice = deal.priority === 'elevated' ? config.priorityPriceRub : 0;
+            const actionText = deal.type === 'buy' ? 'покупки' : 'продажи';
+            const paymentTarget = deal.type === 'buy' ? 'Кошелёк' : 'Реквизиты';
+
+            try {
+                await ctx.deleteMessage(dealData.messageId);
+            } catch (error) {
+                console.error(`Error deleting message ${dealData.messageId}:`, error.message);
+            }
+
+            const paymentMethodName = await getPaymentMethodName(variantMethod);
+            const paymentOptionName = variantOption && PAYMENT_OPTION_NAMES[variantOption] ? PAYMENT_OPTION_NAMES[variantOption] : '';
+            const paymentOptionText = paymentOptionName ? ` (${paymentOptionName})` : '';
+
+            const message = await sendBitCheckPhoto(ctx.chat.id, {
+                caption: `✅ Подтверждение ${actionText} ${deal.currency}\n` +
+                    `Количество: ${deal.cryptoAmount} ${deal.currency}\n` +
+                    `Сумма: ${deal.rubAmount} RUB\n` +
+                    `Комиссия: ${deal.commission} RUB (скидка ${discount.toFixed(2)}%)\n` +
+                    `Приоритет: ${deal.priority === 'elevated' ? `Повышенный (+${priorityPrice} RUB)` : 'Обычный'}\n` +
+                    `Платёжная система: Карта - ${paymentMethodName || variantMethod}${paymentOptionText}\n` +
+                    `Итог: ${deal.total} RUB\n` +
+                    `${paymentTarget}: <code>${deal.walletAddress}</code>`,
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: '✅ Создать заявку', callback_data: `submit_${deal.id}_${variantMethod}` }],
+                        [{ text: '❌ Отменить', callback_data: `cancel_deal_${deal.id}` }]
+                    ]
+                },
+                parse_mode: 'HTML'
+            });
+
+            states.pendingDeal[from].messageId = message.message_id;
+            states.pendingDeal[from].paymentVariant = variantMethod;
+            states.pendingDeal[from].paymentOption = variantOption;
+            saveJson('states', states);
+            await ctx.answerCbQuery(`✅ Выбран вариант оплаты: ${paymentMethodName || variantMethod}${paymentOptionText}`, { show_alert: false });
+            return;
+        }
+
+        if (data === 'select_bitcheck-requisites') {
+            const states = loadJson('states');
+            const dealData = states.pendingDeal[from];
+            const deal = deals.find(d => d.id === dealData.dealId);
+            const config = loadJson('config');
+            const discount = await getCommissionDiscount(from);
+            const priorityPrice = deal.priority === 'elevated' ? config.priorityPriceRub : 0;
+            const actionText = deal.type === 'buy' ? 'покупки' : 'продажи';
+            const paymentTarget = deal.type === 'buy' ? 'Кошелёк' : 'Реквизиты';
+
+            deal.processingStatus = false;
+            deals[deals.findIndex(d => d.id === deal.id)] = deal;
+
+            try {
+                await ctx.deleteMessage(dealData.messageId);
+            } catch (error) {
+                console.error(`Error deleting message ${dealData.messageId}:`, error.message);
+            }
+
+            const message = await sendBitCheckPhoto(ctx.chat.id, {
+                caption: `✅ Подтверждение ${actionText} ${deal.currency}\n` +
+                    `Количество: ${deal.cryptoAmount} ${deal.currency}\n` +
+                    `Сумма: ${deal.rubAmount} RUB\n` +
+                    `Комиссия: ${deal.commission} RUB (скидка ${discount.toFixed(2)}%)\n` +
+                    `Приоритет: ${deal.priority === 'elevated' ? `Повышенный (+${priorityPrice} RUB)` : 'Обычный'}\n` +
+                    `Итог: ${deal.total} RUB\n` +
+                    `${paymentTarget}: <code>${deal.walletAddress}</code>`,
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: '✅ Создать заявку', callback_data: `submit_${deal.id}` }],
+                        [{ text: '❌ Отменить', callback_data: `cancel_deal_${deal.id}` }]
+                    ]
+                },
+                parse_mode: 'HTML'
+            });
+            states.pendingDeal[from].messageId = message.message_id;
+            saveJson('states', states);
+            saveJson('deals', deals);
+            await ctx.answerCbQuery('✅ Выбраны реквизиты BitCheck', { show_alert: false });
+            return;
+        }
+
         if (data.startsWith('submit_')) {
             const states = loadStates();
-            const dealId = data.split('_')[1];
+            const [dealId, paymentVariant] = data.split('_').slice(1);
             const dealIndex = deals.findIndex(d => d.id === dealId && d.status === 'draft');
             if (dealIndex === -1) {
                 await ctx.answerCbQuery('❌ Заявка не найдена или уже обработана', { show_alert: true });
@@ -2386,24 +3042,69 @@ main_bot.on('callback_query', async ctx => {
             const config = loadJson('config');
             const actionText = deal.type === 'buy' ? 'Покупка' : 'Продажа';
             const paymentTarget = deal.type === 'buy' ? 'Кошелёк' : 'Реквизиты';
-            const contactUrl = getContactUrl(deal.currency);
+            const operatorContactUrl = getOperatorContactUrl(deal.currency);
             const discount = await getCommissionDiscount(deal.userId);
             const priorityPrice = deal.priority === 'elevated' ? config.priorityPriceRub : 0;
 
             let paymentDetailsText;
+            let selectedPaymentDetails;
             if (deal.type === 'buy') {
                 paymentDetailsText = `${paymentTarget}: <code>${deal.walletAddress}</code>`;
-                const selectedPaymentDetails = getBalancedPaymentDetails(config.buyPaymentDetails || []);
-                if (selectedPaymentDetails) {
-                    deal.selectedPaymentDetailsId = selectedPaymentDetails.id;
-                    const paymentDetailsIndex = config.buyPaymentDetails.findIndex(detail => detail.id === selectedPaymentDetails.id);
-                    if (paymentDetailsIndex !== -1) {
-                        config.buyPaymentDetails[paymentDetailsIndex].timestamp = new Date().toISOString();
-                        saveJson('config', config);
+                if (deal.processingStatus) {
+                    try {
+                        const merchantDeal = await startMerchantDeal(
+                            states.pendingDeal[deal.userId].paymentDetailsId,
+                            paymentVariant,
+                            MERCHANT_API_KEY
+                        );
+                        deal.selectedPaymentDetailsId = merchantDeal.id;
+                        deal.paymentDetailsId = states.pendingDeal[deal.userId].paymentDetailsId;
+                        deal.paymentInternalId = states.pendingDeal[deal.userId].paymentInternalId || merchantDeal.internalId;
+                        deal.paymentVariant = paymentVariant;
+                        deal.paymentOption = states.pendingDeal[deal.userId].paymentOption;
+                        selectedPaymentDetails = merchantDeal.deals[0];
+                        const expiresAt = new Date(merchantDeal.expireAt);
+                        const now = new Date();
+                        const deadlineMinutes = Math.ceil((expiresAt - now) / (60 * 1000));
+                        const formattedDeadline = formatDate(expiresAt, true);
+
+                        paymentDetailsText += `\n\nРеквизиты BitCheck:\n<code>Оплату переводите строго по реквизитам ниже ⚠️ Время на оплату — ${deadlineMinutes} минут (крайнее время - ${formattedDeadline}) ⏱️ Затем пришлите заявку и чек оператору ⚠️\nКарта: ${selectedPaymentDetails.requisites.requisites}\nФИО: ${selectedPaymentDetails.requisites.holder}</code>`;
+                    } catch (error) {
+                        paymentDetailsText += `\n\nРеквизиты BitCheck:\n<code>‼️ Ошибка. Для вашей суммы в данный момент нет подходящих реквизитов</code>`;
+                        selectedPaymentDetails = null;
                     }
-                    paymentDetailsText += `\n\nРеквизиты BitCheck:\n<code>Оплату переводите строго по реквизитам ниже ⚠️ Время на оплату — ${config.paymentDetailsRecoveryTimeMinutes} минут ⏱️ Затем пришлите заявку и чек оператору ⚠️\n${selectedPaymentDetails.description}</code>`;
                 } else {
-                    paymentDetailsText += `\n\nРеквизиты BitCheck:\n<code>Не удалось выбрать реквизиты, свяжитесь с оператором.</code>`;
+                    selectedPaymentDetails = getAvailablePaymentDetails(deal.currency, deal.rubAmount);
+                    if (selectedPaymentDetails) {
+                        deal.selectedPaymentDetailsId = selectedPaymentDetails.id;
+                        let targetPaymentDetails;
+                        if (deal.currency === 'BTC') {
+                            targetPaymentDetails = config.buyPaymentDetailsBTC;
+                        } else if (deal.currency === 'LTC') {
+                            targetPaymentDetails = config.buyPaymentDetailsLTC;
+                        }
+                        const paymentDetailsIndex = targetPaymentDetails.findIndex(detail => detail.id === selectedPaymentDetails.id);
+                        if (paymentDetailsIndex !== -1) {
+                            targetPaymentDetails[paymentDetailsIndex].timestamp = new Date().toISOString();
+                            const currentRubAmount = deals
+                                .filter(d =>
+                                    d.selectedPaymentDetailsId === selectedPaymentDetails.id &&
+                                    ['pending', 'completed'].includes(d.status) &&
+                                    new Date(d.timestamp) >= new Date(targetPaymentDetails[paymentDetailsIndex].lastResetTimestamp || 0)
+                                )
+                                .reduce((sum, d) => sum + (d.rubAmount || 0), 0);
+                            if (currentRubAmount >= targetPaymentDetails[paymentDetailsIndex].limitReachedRub) {
+                                targetPaymentDetails[paymentDetailsIndex].lastResetTimestamp = new Date().toISOString();
+                            }
+                            saveJson('config', config);
+                        }
+                        const deadlineMinutes = config.dealPaymentDeadlineMinutes;
+                        const deadlineTime = new Date(Date.now() + deadlineMinutes * 60 * 1000);
+                        const formattedDeadline = formatDate(deadlineTime, true);
+                        paymentDetailsText += `\n\nРеквизиты BitCheck:\n<code>Оплату переводите строго по реквизитам ниже ⚠️ Время на оплату — ${config.dealPaymentDeadlineMinutes} минут (крайнее время - ${formattedDeadline}) ⏱️ Затем пришлите заявку и чек оператору ⚠️\n${selectedPaymentDetails.description}</code>`;
+                    } else {
+                        paymentDetailsText += `\n\nРеквизиты BitCheck:\n<code>‼️ Свяжитесь с оператором для получения реквизитов или попробуйте создать заявку через ${config.dealCreationRecoveryMinutes} минут</code>`;
+                    }
                 }
             } else {
                 const bitCheckWallet = deal.currency === 'BTC' ? config.sellWalletBTC : config.sellWalletLTC;
@@ -2414,29 +3115,46 @@ main_bot.on('callback_query', async ctx => {
             try {
                 await ctx.deleteMessage(states.pendingDeal[deal.userId]?.messageId);
             } catch (error) {
-                console.error(`Ошибка удаления сообщения ${states.pendingDeal[deal.userId]?.messageId}:`, error.message);
+                console.error(`Error deleting message ${states.pendingDeal[deal.userId]?.messageId}:`, error.message);
+            }
+
+            let paymentSystemText = '';
+            if (deal.processingStatus && states.pendingDeal[deal.userId]) {
+                const paymentVariant = states.pendingDeal[deal.userId].paymentVariant;
+                const paymentOption = states.pendingDeal[deal.userId].paymentOption;
+                if (paymentVariant) {
+                    const paymentMethodName = await getPaymentMethodName(paymentVariant);
+                    const paymentOptionName = paymentOption && PAYMENT_OPTION_NAMES[paymentOption] ? PAYMENT_OPTION_NAMES[paymentOption] : '';
+                    const paymentOptionText = paymentOptionName ? ` (${paymentOptionName})` : '';
+                    paymentSystemText = `Платёжная система: Карта - ${paymentMethodName}${paymentOptionText}\n`;
+                }
             }
 
             const caption = `✅ Заявка на сделку создана! № ${deal.id}\n` +
                 `${actionText} ${deal.currency}\n` +
                 `Количество: ${deal.cryptoAmount} ${deal.currency}\n` +
                 `Сумма: ${deal.rubAmount} RUB\n` +
-                `Комиссия: ${deal.commission.toFixed(2)} RUB (скидка ${discount}%)\n` +
+                `Комиссия: ${deal.commission} RUB (скидка ${discount.toFixed(2)}%)\n` +
                 `Приоритет: ${deal.priority === 'elevated' ? `Повышенный (+${priorityPrice} RUB)` : 'Обычный'}\n` +
-                `Итог: ${deal.total.toFixed(2)} RUB\n` +
+                `${paymentSystemText}` +
+                `Итог: ${deal.total} RUB\n` +
                 `${paymentDetailsText}\n\n` +
                 `${deal.type === 'buy'
-                    ? 'Пожалуйста, произведите оплату по указанным реквизитам и подтвердите, нажав "Оплата выполнена".'
-                    : 'Отправьте указанное количество на кошелёк BitCheck и свяжитесь с оператором для завершения сделки!'} ⬇️`;
+                    ? (selectedPaymentDetails
+                        ? '‼️ Пожалуйста, произведите оплату по указанным реквизитам и подтвердите, нажав "Оплата выполнена"'
+                        : '‼️ Свяжитесь с оператором для получения реквизитов')
+                    : '‼️ Отправьте указанное количество на кошелёк BitCheck и свяжитесь с оператором для завершения сделки'} ⬇️`;
 
             const replyMarkup = deal.type === 'buy' ? {
                 inline_keyboard: [
-                    [{ text: '✅ Оплата выполнена', callback_data: `payment_done_${deal.id}` }],
+                    selectedPaymentDetails
+                        ? [{ text: '✅ Оплата выполнена', callback_data: `payment_done_${deal.id}` }]
+                        : [{ text: '📞 Связаться с оператором', url: operatorContactUrl }],
                     [{ text: '❌ Отменить заявку', callback_data: `cancel_deal_${deal.id}` }]
                 ]
             } : {
                 inline_keyboard: [
-                    [{ text: '📞 Написать оператору', url: contactUrl }],
+                    [{ text: '📞 Написать оператору', url: operatorContactUrl }],
                     [{ text: '❌ Отменить заявку', callback_data: `cancel_deal_${deal.id}` }]
                 ]
             };
@@ -2454,15 +3172,28 @@ main_bot.on('callback_query', async ctx => {
                     try {
                         const operatorId = users.find(u => u.username === operator.username)?.id;
                         if (operatorId && await isValidChat(operatorId)) {
+                            let operatorPaymentSystemText = '';
+                            if (deal.processingStatus && states.pendingDeal[deal.userId]) {
+                                const paymentVariant = states.pendingDeal[deal.userId].paymentVariant;
+                                const paymentOption = states.pendingDeal[deal.userId].paymentOption;
+                                if (paymentVariant) {
+                                    const paymentMethodName = await getPaymentMethodName(paymentVariant);
+                                    const paymentOptionName = paymentOption && PAYMENT_OPTION_NAMES[paymentOption] ? PAYMENT_OPTION_NAMES[paymentOption] : '';
+                                    const paymentOptionText = paymentOptionName ? ` (${paymentOptionName})` : '';
+                                    operatorPaymentSystemText = `Платёжная система: Карта - ${paymentMethodName}${paymentOptionText}\n`;
+                                }
+                            }
+                            
                             await sendBitCheckPhoto(operatorId, {
                                 caption: `🆕 Новая заявка на сделку № ${deal.id}\n` +
                                     `${actionText} ${deal.currency}\n` +
                                     `@${user.username || 'Нет'} (ID ${deal.userId})\n` +
                                     `Количество: ${deal.cryptoAmount}\n` +
                                     `Сумма: ${deal.rubAmount} RUB\n` +
-                                    `Комиссия: ${deal.commission.toFixed(2)} RUB (скидка ${discount}%)\n` +
+                                    `Комиссия: ${deal.commission} RUB (скидка ${discount.toFixed(2)}%)\n` +
                                     `Приоритет: ${deal.priority === 'elevated' ? `Повышенный (+${priorityPrice} RUB)` : 'Обычный'}\n` +
-                                    `Итог: ${deal.total.toFixed(2)} RUB\n` +
+                                    `${operatorPaymentSystemText}` +
+                                    `Итог: ${deal.total} RUB\n` +
                                     `${paymentDetailsText}`,
                                 reply_markup: {
                                     inline_keyboard: [
@@ -2477,7 +3208,7 @@ main_bot.on('callback_query', async ctx => {
                             });
                         }
                     } catch (error) {
-                        console.error(`Ошибка отправки оператору ${operator.username}:`, error.message);
+                        console.error(`Error sending to operator ${operator.username}:`, error.message);
                     }
                 }
             }
@@ -2496,109 +3227,220 @@ main_bot.on('callback_query', async ctx => {
                 await ctx.answerCbQuery('❌ Заявка не найдена или уже обработана', { show_alert: true });
                 return;
             }
-
             const deal = deals[dealIndex];
-            deal.status = 'pending';
-            deals[dealIndex] = deal;
-
             const users = loadJson('users');
             const user = users.find(u => u.id === deal.userId);
             const config = loadJson('config');
-            const contactUrl = getContactUrl(deal.currency);
+            const operatorContactUrl = getOperatorContactUrl(deal.currency);
             const discount = await getCommissionDiscount(deal.userId);
             const priorityPrice = deal.priority === 'elevated' ? config.priorityPriceRub : 0;
+            let paymentDetailsText = '';
 
-            if (deal.selectedPaymentDetailsId) {
-                const paymentDetailsIndex = config.buyPaymentDetails.findIndex(detail => detail.id === deal.selectedPaymentDetailsId);
-                if (paymentDetailsIndex !== -1) {
-                    config.buyPaymentDetails[paymentDetailsIndex].confirmedUsages++;
-                    saveJson('config', config);
-                } else {
-                    console.error('Реквизиты не найдены в config.buyPaymentDetails:', deal.selectedPaymentDetailsId);
+            if (deal.processingStatus) {
+                try {
+                    const invoiceId = deal.selectedPaymentDetailsId || deal.paymentDetailsId || states.pendingDeal[deal.userId]?.paymentDetailsId;
+                    
+                    if (!invoiceId) {
+                        throw new Error('invoiceId not found');
+                    }
+                    
+                    const invoice = await getMerchantInvoice(invoiceId, MERCHANT_API_KEY);
+                    
+                    if (!invoice.deals || invoice.deals.length === 0) {
+                        throw new Error('No deals found in invoice');
+                    }
+                    
+                    const selectedPaymentDetails = invoice.deals[0];
+                    deal.selectedPaymentDetailsId = invoice.id;
+                    
+                    const paymentTarget = deal.type === 'buy' ? 'Кошелёк' : 'Реквизиты';
+                    paymentDetailsText = `${paymentTarget}: <code>${deal.walletAddress}</code>`;
+                    
+                    if (selectedPaymentDetails.requisites) {
+                        paymentDetailsText += `\n\nРеквизиты BitCheck:\n<code>Карта: ${selectedPaymentDetails.requisites.requisites}\nФИО: ${selectedPaymentDetails.requisites.holder}</code>`;
+                    }
+                    
+                    const dealStatusFromAPI = selectedPaymentDetails.status;
+                    
+                    if (dealStatusFromAPI === 'completed') {
+                        deal.status = 'pending';
+                        deals[dealIndex] = deal;
+                        saveJson('deals', deals);
+                        
+                        try {
+                            await ctx.deleteMessage(states.pendingDeal[deal.userId]?.messageId);
+                        } catch (error) {
+                            console.error(`Error deleting message ${states.pendingDeal[deal.userId]?.messageId}:`, error.message);
+                        }
+                        
+                        const message = await sendBitCheckPhoto(ctx.chat.id, {
+                            caption: `✅ Оплата по заявке № ${deal.id} подтверждена!\n` +
+                                `Покупка ${deal.currency}\n` +
+                                `Количество: ${deal.cryptoAmount} ${deal.currency}\n` +
+                                `Сумма: ${deal.rubAmount} RUB\n` +
+                                `Комиссия: ${deal.commission} RUB (скидка ${discount.toFixed(2)}%)\n` +
+                                `Приоритет: ${deal.priority === 'elevated' ? `Повышенный (+${priorityPrice} RUB)` : 'Обычный'}\n` +
+                                `Итог: ${deal.total} RUB\n` +
+                                `Кошелёк: ${deal.walletAddress}\n\n` +
+                                `Свяжитесь с оператором, чтобы завершить сделку! ⬇️`,
+                            reply_markup: {
+                                inline_keyboard: [
+                                    [{ text: '📞 Написать оператору', url: operatorContactUrl }],
+                                    [{ text: '❌ Отменить заявку', callback_data: `cancel_deal_${deal.id}` }]
+                                ]
+                            },
+                            parse_mode: 'HTML'
+                        });
+                        
+                        states.pendingDeal[deal.userId] = { messageId: message.message_id, dealId: deal.id };
+                        saveJson('states', states);
+                    } else {
+                        deals[dealIndex] = deal;
+                        saveJson('deals', deals);
+                        
+                        await ctx.answerCbQuery('⏳ Проверка статуса оплаты запущена. Ожидаем подтверждения от API...', { show_alert: false });
+                        
+                        await checkInvoiceStatus(deal.id, deal.userId, deal.selectedPaymentDetailsId || deal.paymentDetailsId, MERCHANT_API_KEY);
+                        return;
+                    }
+                } catch (error) {
+                    console.error(`Error processing payment for deal ${deal.id}:`, error.message);
+                    await ctx.answerCbQuery('❌ Ошибка при обработке оплаты', { show_alert: true });
+                    return;
                 }
             } else {
-                console.error('ID реквизитов не найден для сделки:', deal.id);
-            }
+                if (deal.selectedPaymentDetailsId) {
+                    let targetPaymentDetails;
+                    if (deal.currency === 'BTC') {
+                        targetPaymentDetails = config.buyPaymentDetailsBTC;
+                    } else if (deal.currency === 'LTC') {
+                        targetPaymentDetails = config.buyPaymentDetailsLTC;
+                    }
+                    const paymentDetailsIndex = targetPaymentDetails.findIndex(detail => detail.id === deal.selectedPaymentDetailsId);
+                    if (paymentDetailsIndex !== -1) {
+                        targetPaymentDetails[paymentDetailsIndex].confirmedUsages++;
+                        targetPaymentDetails[paymentDetailsIndex].timestamp = new Date().toISOString();
+                        saveJson('config', config);
+                        paymentDetailsText += `\n\nРеквизиты BitCheck:\n<code>${targetPaymentDetails[paymentDetailsIndex].description}</code>`;
+                    } else {
+                        paymentDetailsText += `\n\nРеквизиты BitCheck:\n<code>‼️ Не удалось выбрать реквизиты</code>`;
+                    }
+                }
 
-            try {
-                await ctx.deleteMessage(states.pendingDeal[deal.userId]?.messageId);
-            } catch (error) {
-                console.error(`Ошибка удаления сообщения ${states.pendingDeal[deal.userId]?.messageId}:`, error.message);
-            }
+                try {
+                    await ctx.deleteMessage(states.pendingDeal[deal.userId]?.messageId);
+                } catch (error) {
+                    console.error(`Error deleting message ${states.pendingDeal[deal.userId]?.messageId}:`, error.message);
+                }
 
-            const paymentTarget = deal.type === 'buy' ? 'Кошелёк' : 'Реквизиты';
-            const message = await sendBitCheckPhoto(ctx.chat.id, {
-                caption: `✅ Оплата по заявке № ${deal.id} подтверждена!\n` +
-                    `Покупка ${deal.currency}\n` +
-                    `Количество: ${deal.cryptoAmount} ${deal.currency}\n` +
-                    `Сумма: ${deal.rubAmount} RUB\n` +
-                    `Комиссия: ${deal.commission.toFixed(2)} RUB (скидка ${discount}%)\n` +
-                    `Приоритет: ${deal.priority === 'elevated' ? `Повышенный (+${priorityPrice} RUB)` : 'Обычный'}\n` +
-                    `Итог: ${deal.total.toFixed(2)} RUB\n` +
-                    `${paymentTarget}: <code>${deal.walletAddress}</code>\n\n` +
-                    `Свяжитесь с оператором, чтобы завершить сделку! ⬇️`,
-                reply_markup: {
-                    inline_keyboard: [
-                        [{ text: '📞 Написать оператору', url: contactUrl }],
-                        [{ text: '❌ Отменить заявку', callback_data: `cancel_deal_${deal.id}` }]
-                    ]
-                },
-                parse_mode: 'HTML'
-            });
-            states.pendingDeal[deal.userId] = { messageId: message.message_id, dealId: deal.id };
+                const message = await sendBitCheckPhoto(ctx.chat.id, {
+                    caption: `✅ Оплата по заявке № ${deal.id} подтверждена!\n` +
+                        `Покупка ${deal.currency}\n` +
+                        `Количество: ${deal.cryptoAmount} ${deal.currency}\n` +
+                        `Сумма: ${deal.rubAmount} RUB\n` +
+                        `Комиссия: ${deal.commission} RUB (скидка ${discount.toFixed(2)}%)\n` +
+                        `Приоритет: ${deal.priority === 'elevated' ? `Повышенный (+${priorityPrice} RUB)` : 'Обычный'}\n` +
+                        `Итог: ${deal.total} RUB\n` +
+                        `${paymentDetailsText}\n\n` +
+                        `Свяжитесь с оператором, чтобы завершить сделку! ⬇️`,
+                    reply_markup: {
+                        inline_keyboard: [
+                            [{ text: '📞 Написать оператору', url: operatorContactUrl }],
+                            [{ text: '❌ Отменить заявку', callback_data: `cancel_deal_${deal.id}` }]
+                        ]
+                    },
+                    parse_mode: 'HTML'
+                });
+
+                states.pendingDeal[deal.userId] = { messageId: message.message_id, dealId: deal.id };
+                saveJson('states', states);
+                saveJson('deals', deals);
+            }
 
             const operators = getOperators(deal.currency);
             for (const operator of operators) {
                 try {
                     const operatorId = users.find(u => u.username === operator.username)?.id;
                     if (operatorId && await isValidChat(operatorId)) {
+                        const operatorKeyboard = [
+                            [
+                                { text: '🗑️ Удалить', callback_data: `operator_delete_deal_${deal.id}` },
+                                { text: '✅ Завершить', callback_data: `operator_complete_deal_${deal.id}` }
+                            ],
+                            [{ text: '📞 Написать пользователю', url: user.username ? `https://t.me/${user.username}` : `https://t.me/id${deal.userId}` }]
+                        ];
+                        if (deal.processingStatus) {
+                            operatorKeyboard.unshift([
+                                { text: '🔗 Приложить хеш транзакции', callback_data: `attach_tx_hash_${deal.id}` }
+                            ]);
+                        }
                         await sendBitCheckPhoto(operatorId, {
                             caption: `🆕 Новая заявка на сделку № ${deal.id}\n` +
                                 `Покупка ${deal.currency}\n` +
                                 `@${user.username || 'Нет'} (ID ${deal.userId})\n` +
                                 `Количество: ${deal.cryptoAmount}\n` +
                                 `Сумма: ${deal.rubAmount} RUB\n` +
-                                `Комиссия: ${deal.commission.toFixed(2)} RUB (скидка ${discount}%)\n` +
+                                `Комиссия: ${deal.commission} RUB (скидка ${discount.toFixed(2)}%)\n` +
                                 `Приоритет: ${deal.priority === 'elevated' ? `Повышенный (+${priorityPrice} RUB)` : 'Обычный'}\n` +
-                                `Итог: ${deal.total.toFixed(2)} RUB\n` +
-                                `${paymentTarget}: <code>${deal.walletAddress}</code>`,
+                                `Итог: ${deal.total} RUB\n` +
+                                `${paymentDetailsText}`,
                             reply_markup: {
-                                inline_keyboard: [
-                                    [
-                                        { text: '🗑️ Удалить', callback_data: `operator_delete_deal_${deal.id}` },
-                                        { text: '✅ Завершить', callback_data: `operator_complete_deal_${deal.id}` }
-                                    ],
-                                    [{ text: '📞 Написать пользователю', url: user.username ? `https://t.me/${user.username}` : `https://t.me/id${deal.userId}` }]
-                                ]
+                                inline_keyboard: operatorKeyboard
                             },
                             parse_mode: 'HTML'
                         });
                     }
                 } catch (error) {
-                    console.error(`Ошибка отправки оператору ${operator.username}:`, error.message);
+                    console.error(`Error sending to operator ${operator.username}:`, error.message);
                 }
             }
 
             await ctx.answerCbQuery('✅ Оплата подтверждена', { show_alert: false });
-            saveJson('deals', deals);
+        }
+
+        if (data.startsWith('attach_tx_hash_')) {
+            const states = loadStates();
+            clearPendingStates(states, from);
+            const dealId = data.split('_')[3];
+            const dealIndex = deals.findIndex(d => d.id === dealId && d.status === 'pending');
+            if (dealIndex === -1) {
+                await ctx.answerCbQuery('❌ Заявка не найдена или уже обработана', { show_alert: true });
+                return;
+            }
+            const deal = deals[dealIndex];
+            states.pendingTransactionHash[ctx.from.id] = { dealId: deal.id };
             saveJson('states', states);
-            return;
+            await ctx.reply('🔗 Введите хеш транзакции', {
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: '❌ Отменить', callback_data: 'cancel_action' }]
+                    ]
+                }
+            });
         }
 
         if (data.startsWith('cancel_deal_')) {
             const states = loadStates();
             const dealId = data.split('_')[2];
-            const dealIndex = deals.findIndex(d => d.id === dealId && (d.status === 'draft' || d.status === 'pending'));
+            const dealIndex = deals.findIndex(d => d.id === dealId && (d.status !== 'completed'));
 
             if (dealIndex !== -1) {
                 const deal = deals[dealIndex];
                 deals.splice(dealIndex, 1);
                 saveJson('deals', deals);
 
+                if (deal.processingStatus && deal.selectedPaymentDetailsId) {
+                    try {
+                        await cancelInvoice(deal.selectedPaymentDetailsId, MERCHANT_API_KEY);
+                    } catch (error) {
+                        console.error(`Error canceling invoice for deal ${dealId}:`, error.message);
+                    }
+                }
+
                 try {
                     await ctx.deleteMessage(states.pendingDeal[from]?.messageId);
                 } catch (error) {
-                    console.error(`Ошибка удаления сообщения ${states.pendingDeal[from]?.messageId}:`, error.message);
+                    console.error(`Error deleting message ${states.pendingDeal[from]?.messageId}:`, error.message);
                 }
 
                 const caption = deal.status === 'draft'
@@ -2639,7 +3481,7 @@ main_bot.on('callback_query', async ctx => {
 
                 await ctx.answerCbQuery('✅ Сделка удалена', { show_alert: false });
             } catch (error) {
-                console.error('Ошибка удаления сделки:', error.message);
+                console.error('Error deleting deal:', error.message);
                 await ctx.answerCbQuery('❌ Ошибка при удалении сделки', { show_alert: true });
             }
             return;
@@ -2665,16 +3507,23 @@ main_bot.on('callback_query', async ctx => {
                 const config = loadJson('config');
                 const actionText = deal.type === 'buy' ? 'Покупка' : 'Продажа';
                 const priorityPrice = deal.priority === 'elevated' ? config.priorityPriceRub : 0;
-                const caption = `✅ Сделка завершена! №${deal.id}\n${actionText} ${deal.currency}\nКоличество: ${deal.cryptoAmount} ${deal.currency}\nСумма: ${deal.rubAmount} RUB\nКомиссия: ${deal.commission.toFixed(2)} RUB\nПриоритет: ${deal.priority === 'elevated' ? `Повышенный (+${priorityPrice} RUB)` : 'Обычный'}\nИтог: ${deal.total.toFixed(2)} RUB\nКошелёк: ${deal.walletAddress}`;
+                const caption = `✅ Сделка №${deal.id} завершена!\n` +
+                    `${actionText} ${deal.currency}\n` +
+                    `Количество: ${deal.cryptoAmount} ${deal.currency}\n` +
+                    `Сумма: ${deal.rubAmount} RUB\n` +
+                    `Комиссия: ${deal.commission} RUB\n` +
+                    `Приоритет: ${deal.priority === 'elevated' ? `Повышенный (+${priorityPrice} RUB)` : 'Обычный'}\n` +
+                    `Итог: ${deal.total} RUB\n` +
+                    `Кошелёк: ${deal.walletAddress}`;
 
-                const contactUrl = getContactUrl(deal.currency);
+                const operatorContactUrl = getOperatorContactUrl(deal.currency);
 
                 try {
                     const message = await sendBitCheckPhoto(user.id, {
                         caption: caption,
                         reply_markup: {
                             inline_keyboard: [
-                                [{ text: '📞 Написать оператору', url: contactUrl }]
+                                [{ text: '📞 Написать оператору', url: operatorContactUrl }]
                             ]
                         }
                     });
@@ -2682,7 +3531,7 @@ main_bot.on('callback_query', async ctx => {
                     states.pendingDeal[user.id] = { messageId: message.message_id };
                     saveJson('states', states);
                 } catch (error) {
-                    console.error(`Ошибка отправки уведомления о завершении пользователю ${user.id}:`, error.message);
+                    console.error(`Error sending completion notification to user ${user.id}:`, error.message);
                 }
 
                 const referrer = users.find(u => u.referrals && u.referrals.includes(deal.userId));
@@ -2700,7 +3549,7 @@ main_bot.on('callback_query', async ctx => {
                             caption: `🎉 Реферальный бонус! +${commissionBTC.toFixed(8)} BTC (~${earningsRub.toFixed(2)}) за сделку ID ${deal.id}`
                         });
                     } catch (error) {
-                        console.error(`Ошибка отправки уведомления рефереру ${referrer.id}:`, error.message);
+                        console.error(`Error sending notification to referrer ${referrer.id}:`, error.message);
                     }
                 }
 
@@ -2716,7 +3565,7 @@ main_bot.on('callback_query', async ctx => {
 
                 await ctx.answerCbQuery('✅ Сделка завершена', { show_alert: false });
             } catch (error) {
-                console.error('Ошибка завершения сделки:', error.message);
+                console.error('Error completing deal:', error.message);
                 await ctx.answerCbQuery('❌ Ошибка при завершении сделки', { show_alert: true });
             }
             return;
@@ -2738,14 +3587,14 @@ main_bot.on('callback_query', async ctx => {
                 saveJson('withdrawals', withdrawals);
 
                 const userId = withdrawal.userId;
-                const contactUrl = getContactUrl('BTC');
+                const operatorContactUrl = getOperatorContactUrl('BTC');
 
                 try {
                     const message = await sendBitCheckPhoto(userId, {
                         caption: `✅ Вывод рефералов завершен! № ${withdrawal.id}\nКоличество: ${withdrawal.cryptoAmount.toFixed(8)} BTC\nСумма: ${withdrawal.rubAmount.toFixed(2)} RUB\nКошелёк: ${withdrawal.walletAddress}`,
                         reply_markup: {
                             inline_keyboard: [
-                                [{ text: '📞 Написать оператору', url: contactUrl }]
+                                [{ text: '📞 Написать оператору', url: operatorContactUrl }]
                             ]
                         }
                     });
@@ -2753,7 +3602,7 @@ main_bot.on('callback_query', async ctx => {
                     states.pendingWithdrawal[userId] = { messageId: message.message_id };
                     saveJson('states', states);
                 } catch (error) {
-                    console.error(`Ошибка отправки уведомления о завершении вывода пользователю ${userId}:`, error.message);
+                    console.error(`Error sending withdrawal completion notification to user ${userId}:`, error.message);
                 }
 
                 try {
@@ -2768,7 +3617,7 @@ main_bot.on('callback_query', async ctx => {
 
                 await ctx.answerCbQuery('✅ Вывод завершен', { show_alert: false });
             } catch (error) {
-                console.error('Ошибка завершения вывода:', error.message);
+                console.error('Error completing withdrawal:', error.message);
                 await ctx.answerCbQuery('❌ Ошибка при завершении вывода', { show_alert: true });
             }
             return;
@@ -2779,16 +3628,16 @@ main_bot.on('callback_query', async ctx => {
             try {
                 await ctx.deleteMessage(ctx.callbackQuery.message.message_id);
             } catch (error) {
-                console.error(`Ошибка удаления сообщения обратного вызова ${ctx.callbackQuery.message.message_id}:`, error.message);
+                console.error(`Error deleting message обратного вызова ${ctx.callbackQuery.message.message_id}:`, error.message);
             }
 
-            const stateKeys = ['pendingDeal', 'pendingWithdrawal', 'pendingUpdateProfile', 'pendingSupport'];
+            const stateKeys = ['pendingDeal', 'pendingWithdrawal', 'pendingUpdateProfile', 'pendingSupport', 'pendingTransactionHash'];
             for (const key of stateKeys) {
                 if (states[key][from]?.messageId) {
                     try {
                         await ctx.deleteMessage(states[key][from].messageId);
                     } catch (error) {
-                        console.error(`Ошибка удаления сообщения ${states[key][from].messageId}:`, error.message);
+                        console.error(`Error deleting message ${states[key][from].messageId}:`, error.message);
                     }
                 }
             }

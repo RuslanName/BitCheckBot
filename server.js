@@ -1,15 +1,17 @@
 const express = require('express');
-const fs = require('fs-extra');
 const path = require('path');
+const fs = require('fs-extra');
 const bodyParser = require('body-parser');
 const axios = require('axios');
 const FormData = require('form-data');
 const multer = require('multer');
 const jwt = require('jsonwebtoken');
-require('dotenv').config();
 const EventEmitter = require('events');
+const { loadJson, saveJson } = require('./tools/utils');
+const { TELEGRAM_API, JWT_SECRET, DATA_PATH, PORT } = require('./tools/constants.js');
 
 const app = express();
+
 app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/html', express.static(path.join(__dirname, 'public/html')));
@@ -17,13 +19,8 @@ app.use('/html', express.static(path.join(__dirname, 'public/html')));
 const apiRouter = express.Router();
 app.use('/api', apiRouter);
 
-const TELEGRAM_API = `https://api.telegram.org/bot${process.env.MAIN_BOT_TOKEN}`;
-const JWT_SECRET = process.env.JWT_SECRET;
-
 const broadcastEmitter = new EventEmitter();
 const raffleEmitter = new EventEmitter();
-
-module.exports = { broadcastEmitter, raffleEmitter };
 
 function getBotStatus() {
     const config = loadJson('config');
@@ -36,9 +33,20 @@ function setBotStatus(status) {
     saveJson('config', config);
 }
 
+function getProcessingStatus() {
+    const config = loadJson('config');
+    return config.processingStatus !== false;
+}
+
+function setProcessingStatus(status) {
+    const config = loadJson('config');
+    config.processingStatus = status;
+    saveJson('config', config);
+}
+
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
-        const dir = path.join(process.env.DATA_PATH, 'images/broadcasts');
+        const dir = path.join(DATA_PATH, 'images/broadcasts');
         fs.ensureDirSync(dir);
         cb(null, dir);
     },
@@ -59,34 +67,12 @@ const upload = multer({
     limits: { fileSize: 5 * 1024 * 1024 }
 });
 
-function loadJson(name) {
-    const filePath = path.join(process.env.DATA_PATH, 'database', `${name}.json`);
-    try {
-        if (!fs.existsSync(filePath)) {
-            return [];
-        }
-        return fs.readJsonSync(filePath);
-    } catch (err) {
-        console.error(`Error loading ${name}.json:`, err.message);
-        return [];
-    }
-}
-
-function saveJson(name, data) {
-    try {
-        const filePath = path.join(process.env.DATA_PATH, 'database', `${name}.json`);
-        fs.writeJsonSync(filePath, data, { spaces: 2 });
-    } catch (err) {
-        console.error(`Error saving ${name}.json:`, err.message);
-    }
-}
-
 function sendHtmlFile(res, filePath) {
     if (fs.existsSync(filePath)) {
         res.sendFile(filePath);
     } else {
         console.error(`File not found: ${filePath}`);
-        res.status(404).send('Page not found. Check if the file exists in public/html.');
+        res.status(404).json({ error: 'Page not found' });
     }
 }
 
@@ -97,11 +83,11 @@ function authenticateToken(req, res, next) {
         if (req.originalUrl === '/') {
             return res.redirect('/login');
         }
-        return res.status(401).json({ error: 'Токен не предоставлен' });
+        return res.status(401).json({ error: 'Token not provided' });
     }
 
     jwt.verify(token, JWT_SECRET, (err, user) => {
-        if (err) return res.status(403).json({ error: 'Недействительный токен' });
+        if (err) return res.status(403).json({ error: 'Invalid token' });
         req.user = user;
         next();
     });
@@ -110,7 +96,7 @@ function authenticateToken(req, res, next) {
 function restrictTo(...roles) {
     return (req, res, next) => {
         if (!roles.includes(req.user.role)) {
-            return res.status(403).json({ error: 'Доступ запрещен' });
+            return res.status(403).json({ error: 'Access denied' });
         }
         next();
     };
@@ -125,7 +111,7 @@ apiRouter.post('/login', (req, res) => {
             const token = jwt.sign({ login, role: 'mainAdmin' }, JWT_SECRET, { expiresIn: '1h' });
             return res.json({ token, role: 'mainAdmin' });
         } else {
-            return res.status(401).json({ error: 'В одиночном режиме доступ разрешен только главному администратору' });
+            return res.status(401).json({ error: 'In single operator mode, only the main administrator has access' });
         }
     }
 
@@ -149,7 +135,7 @@ apiRouter.post('/login', (req, res) => {
         return res.json({ token, role: 'admin', currency: operator.currency });
     }
 
-    res.status(401).json({ error: 'Неверный логин или пароль' });
+    res.status(401).json({ error: 'Invalid login or password' });
 });
 
 apiRouter.get('/user', authenticateToken, (req, res) => {
@@ -159,7 +145,7 @@ apiRouter.get('/user', authenticateToken, (req, res) => {
             currency: req.user.currency || null
         });
     } catch (err) {
-        console.error('Ошибка получения данных пользователя:', err.message);
+        console.error('Error fetching user data:', err.message);
         res.status(500).json({ error: 'Internal Server Error' });
     }
 });
@@ -205,9 +191,9 @@ apiRouter.put('/config/credentials', authenticateToken, restrictTo('mainAdmin'),
         cfg.adminLogin = login;
         cfg.adminPassword = password;
         saveJson('config', cfg);
-        res.json({ message: 'Логин и пароль обновлены' });
+        res.json({ message: 'Login and password updated' });
     } else {
-        res.status(400).json({ error: 'Логин и пароль обязательны' });
+        res.status(400).json({ error: 'Login and password are required' });
     }
 });
 
@@ -219,18 +205,41 @@ apiRouter.post('/bot/toggle', authenticateToken, restrictTo('mainAdmin'), (req, 
     const { enabled } = req.body;
 
     if (typeof enabled !== 'boolean') {
-        return res.status(400).json({ error: 'Неверный параметр enabled' });
+        return res.status(400).json({ error: 'Invalid enabled parameter' });
     }
 
     if (getBotStatus() === enabled) {
-        const statusText = enabled ? 'включен' : 'отключен';
-        return res.status(400).json({ error: `Бот уже ${statusText}` });
+        const statusText = enabled ? 'enabled' : 'disabled';
+        return res.status(400).json({ error: `Bot is already ${statusText}` });
     }
 
     setBotStatus(enabled);
     res.json({
-        message: enabled ? 'Бот включен' : 'Бот отключен',
+        message: enabled ? 'Bot enabled' : 'Bot disabled',
         botEnabled: enabled
+    });
+});
+
+apiRouter.get('/processing/status', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
+    res.json({ processingEnabled: getProcessingStatus() });
+});
+
+apiRouter.post('/processing/toggle', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
+    const { enabled } = req.body;
+
+    if (typeof enabled !== 'boolean') {
+        return res.status(400).json({ error: 'Invalid enabled parameter' });
+    }
+
+    if (getProcessingStatus() === enabled) {
+        const statusText = enabled ? 'enabled' : 'disabled';
+        return res.status(400).json({ error: `Processing is already ${statusText}` });
+    }
+
+    setProcessingStatus(enabled);
+    res.json({
+        message: enabled ? 'Processing enabled' : 'Processing disabled',
+        processingEnabled: enabled
     });
 });
 
@@ -317,7 +326,7 @@ apiRouter.patch('/deals/:id/complete', authenticateToken, async (req, res) => {
             return res.sendStatus(404);
         }
         if (req.user.role === 'admin' && deals[idx].currency !== req.user.currency) {
-            return res.status(403).json({ error: 'Недопустимая валюта для вашего аккаунта' });
+            return res.status(403).json({ error: 'Invalid currency for your account' });
         }
 
         deals[idx] = { ...deals[idx], status: 'completed' };
@@ -340,7 +349,7 @@ apiRouter.patch('/deals/:id/complete', authenticateToken, async (req, res) => {
 
             const form = new FormData();
             form.append('chat_id', userId);
-            form.append('photo', fs.createReadStream(path.join(process.env.DATA_PATH, 'images/bit-check-image.png')));
+            form.append('photo', fs.createReadStream(path.join(DATA_PATH, 'images/bit-check-image.png')));
             form.append('caption', caption);
             form.append('reply_markup', JSON.stringify({
                 inline_keyboard: [
@@ -376,7 +385,7 @@ apiRouter.patch('/deals/:id/complete', authenticateToken, async (req, res) => {
             try {
                 const form = new FormData();
                 form.append('chat_id', referrer.id);
-                form.append('photo', fs.createReadStream(path.join(process.env.DATA_PATH, 'images/bit-check-image.png')));
+                form.append('photo', fs.createReadStream(path.join(DATA_PATH, 'images/bit-check-image.png')));
                 form.append('caption', `🎉 Реферальный бонус! +${commissionBTC.toFixed(8)} BTC (~${earningsRub.toFixed(2)}) за сделку ID ${deal.id}`);
                 await axios.post(`${TELEGRAM_API}/sendPhoto`, form, {
                     headers: form.getHeaders(),
@@ -402,7 +411,7 @@ apiRouter.delete('/deals/:id', authenticateToken, (req, res) => {
             return res.sendStatus(404);
         }
         if (req.user.role === 'admin' && deal.currency !== req.user.currency) {
-            return res.status(403).json({ error: 'Недопустимая валюта для вашего аккаунта' });
+            return res.status(403).json({ error: 'Invalid currency for your account' });
         }
         deals = deals.filter(d => d.id !== req.params.id);
         saveJson('deals', deals);
@@ -455,7 +464,7 @@ apiRouter.put('/broadcasts/:id', authenticateToken, restrictTo('mainAdmin'), upl
         }
 
         const existingBroadcast = list[idx];
-        const imagePath = existingBroadcast.imageName ? path.join(process.env.DATA_PATH, 'images/broadcasts', existingBroadcast.imageName) : null;
+        const imagePath = existingBroadcast.imageName ? path.join(DATA_PATH, 'images/broadcasts', existingBroadcast.imageName) : null;
         if (req.file && imagePath && fs.existsSync(imagePath)) {
             fs.removeSync(imagePath);
         }
@@ -487,7 +496,7 @@ apiRouter.delete('/broadcasts/:id', authenticateToken, restrictTo('mainAdmin'), 
         let list = loadJson('broadcasts');
         const broadcast = list.find(x => x.id === req.params.id);
         if (broadcast && broadcast.imageName) {
-            const imagePath = path.join(process.env.DATA_PATH, 'images/broadcasts', broadcast.imageName);
+            const imagePath = path.join(DATA_PATH, 'images/broadcasts', broadcast.imageName);
             fs.removeSync(imagePath);
         }
         list = list.filter(x => x.id !== req.params.id);
@@ -638,7 +647,7 @@ apiRouter.patch('/withdrawals/:id/complete', authenticateToken, restrictTo('main
 
             const form = new FormData();
             form.append('chat_id', userId);
-            form.append('photo', fs.createReadStream(path.join(process.env.DATA_PATH, 'images/bit-check-image.png')));
+            form.append('photo', fs.createReadStream(path.join(DATA_PATH, 'images/bit-check-image.png')));
             form.append('caption', caption);
             form.append('reply_markup', JSON.stringify({
                 inline_keyboard: [
@@ -692,9 +701,10 @@ app.get('/analytics', (req, res) => {
     sendHtmlFile(res, path.join(__dirname, 'public/html/analytics.html'));
 });
 
-const PORT = process.env.PORT || 3000;
 const server = app.listen(PORT, () => console.log(`Server started on port ${PORT}`));
 
 ['SIGTERM', 'SIGINT'].forEach(signal =>
     process.on(signal, () => server.close(() => {}))
 );
+
+module.exports = { broadcastEmitter, raffleEmitter };

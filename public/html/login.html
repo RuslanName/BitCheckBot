@@ -8,23 +8,25 @@
     <link rel="icon" type="image/x-icon" href="https://cdn3.iconfinder.com/data/icons/human-resource-management-set-2/64/2-08-1024.png">
 </head>
 <body class="no-sidebar">
-<main>
-    <section class="form-container">
-        <h1>Вход в систему</h1>
-        <form id="loginForm">
-            <div class="form-group">
-                <label for="login">Логин</label>
-                <input type="text" id="login" name="login" required>
-            </div>
-            <div class="form-group">
-                <label for="password">Пароль</label>
-                <input type="password" id="password" name="password" required>
-            </div>
-            <div id="formError" style="color: red; display: none;"></div>
-            <button type="submit">Войти</button>
-        </form>
-    </section>
-</main>
+<div class="login-container">
+    <main>
+        <section class="login-form form-container">
+            <h1>Вход в систему</h1>
+            <form id="loginForm">
+                <div class="form-group">
+                    <label for="login">Логин</label>
+                    <input type="text" id="login" name="login" required>
+                </div>
+                <div class="form-group">
+                    <label for="password">Пароль</label>
+                    <input type="password" id="password" name="password" required>
+                </div>
+                <div id="formError" style="color: red; display: none;"></div>
+                <button type="submit">Войти</button>
+            </form>
+        </section>
+    </main>
+</div>
 <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
 <script type="module" src="/js/login.js"></script>
 </body>
