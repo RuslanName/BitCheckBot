@@ -3321,9 +3321,9 @@ main_bot.on('callback_query', async ctx => {
                         targetPaymentDetails[paymentDetailsIndex].confirmedUsages++;
                         targetPaymentDetails[paymentDetailsIndex].timestamp = new Date().toISOString();
                         saveJson('config', config);
-                        paymentDetailsText += `\n\nРеквизиты BitCheck:\n<code>${targetPaymentDetails[paymentDetailsIndex].description}</code>`;
+                        paymentDetailsText += `Реквизиты BitCheck:\n<code>${targetPaymentDetails[paymentDetailsIndex].description}</code>`;
                     } else {
-                        paymentDetailsText += `\n\nРеквизиты BitCheck:\n<code>‼️ Не удалось выбрать реквизиты</code>`;
+                        paymentDetailsText += `Реквизиты BitCheck:\n<code>‼️ Не удалось выбрать реквизиты</code>`;
                     }
                 }
 
@@ -3341,6 +3341,7 @@ main_bot.on('callback_query', async ctx => {
                         `Комиссия: ${deal.commission} RUB (скидка ${discount.toFixed(2)}%)\n` +
                         `Приоритет: ${deal.priority === 'elevated' ? `Повышенный (+${priorityPrice} RUB)` : 'Обычный'}\n` +
                         `Итог: ${deal.total} RUB\n` +
+                        `Кошелёк: ${deal.walletAddress}\n\n` +
                         `${paymentDetailsText}\n\n` +
                         `Свяжитесь с оператором, чтобы завершить сделку! ⬇️`,
                     reply_markup: {
@@ -3383,6 +3384,7 @@ main_bot.on('callback_query', async ctx => {
                                 `Комиссия: ${deal.commission} RUB (скидка ${discount.toFixed(2)}%)\n` +
                                 `Приоритет: ${deal.priority === 'elevated' ? `Повышенный (+${priorityPrice} RUB)` : 'Обычный'}\n` +
                                 `Итог: ${deal.total} RUB\n` +
+                                `Кошелёк: ${deal.walletAddress}\n\n` +
                                 `${paymentDetailsText}`,
                             reply_markup: {
                                 inline_keyboard: operatorKeyboard
