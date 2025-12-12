@@ -6,7 +6,7 @@ const cron = require('node-cron');
 const async = require('async');
 const { broadcastEmitter, raffleEmitter } = require('./server');
 const { BIT_CHECK_IMAGE_PATH, CACHE_DURATION, DATA_PATH, MAIN_BOT_TOKEN,
-    PAYMENT_OPTION_NAMES, BIT_CHECK_GROUP_URL, BIT_CHECK_CHAT_URL
+    PAYMENT_OPTION_NAMES, BIT_CHECK_GROUP_URL, BIT_CHECK_CHAT_URL, POST_SCRIPT
 } = require('./src/config/constants');
 const { MESSAGES } = require('./src/config/messages');
 const {
