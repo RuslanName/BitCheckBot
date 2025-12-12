@@ -20,108 +20,93 @@ function initializeUsers() {
         const filterTurnover = document.getElementById('filterTurnover');
         const filterActivity = document.getElementById('filterActivity');
 
-        let users = [];
-        let deals = [];
-        let withdrawals = [];
         let page = 1;
-        let perPage = parseInt(perPageSelect.value) || 25;
+        let perPage = parseInt(perPageSelect.value) || 50;
+        let paginationInfo = { total: 0, totalPages: 0 };
 
-        Promise.all([
-            api.get('/users'),
-            api.get('/deals'),
-            api.get('/withdrawals')
-        ]).then(([uRes, dRes, wRes]) => {
-            users = Array.isArray(uRes.data) ? uRes.data : [];
-            deals = Array.isArray(dRes.data) ? dRes.data : Object.values(dRes.data);
-            withdrawals = Array.isArray(wRes.data) ? wRes.data : Object.values(wRes.data);
-            renderUsersTable();
-        }).catch(err => {
-            console.error('Error loading user data:', err);
-            if (err.response?.status === 401 || err.response?.status === 403) {
-                localStorage.removeItem('token');
-                window.location.href = '/login';
-            } else {
-                tbody.innerHTML = '<tr><td colspan="9">Ошибка загрузки информации</td></tr>';
+        function loadUsers() {
+            const params = {
+                page,
+                perPage
+            };
+            const search = searchInput.value.trim();
+            if (search) {
+                params.search = search;
             }
-        });
+            if (filterRegistrationDate.value) {
+                params.registrationDate = filterRegistrationDate.value;
+            }
+            if (filterDealsCount.value) {
+                params.dealsCount = filterDealsCount.value;
+            }
+            if (filterTurnover.value) {
+                params.turnover = filterTurnover.value;
+            }
+            if (filterActivity.value) {
+                params.activity = filterActivity.value;
+            }
 
+            tbody.innerHTML = '<tr><td colspan="10">Загрузка...</td></tr>';
+
+            api.get('/users', { params }).then(response => {
+                const users = response.data.data || [];
+                paginationInfo = response.data.pagination || { total: 0, totalPages: 0, page: 1, perPage: 50 };
+                renderUsersTable(users);
+            }).catch(err => {
+                console.error('Error loading user data:', err);
+                if (err.response?.status === 401 || err.response?.status === 403) {
+                    localStorage.removeItem('token');
+                    window.location.href = '/login';
+                } else {
+                    tbody.innerHTML = '<tr><td colspan="10">Ошибка загрузки информации</td></tr>';
+                }
+            });
+        }
+
+        loadUsers();
+
+        let searchTimeout;
         searchInput.addEventListener('input', () => {
-            page = 1;
-            renderUsersTable();
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(() => {
+                page = 1;
+                loadUsers();
+            }, 300);
         });
         perPageSelect.addEventListener('change', (e) => {
-            perPage = parseInt(e.target.value) || 25;
+            perPage = parseInt(e.target.value) || 50;
             page = 1;
-            renderUsersTable();
+            loadUsers();
         });
         filterRegistrationDate.addEventListener('input', () => {
             page = 1;
-            renderUsersTable();
+            loadUsers();
         });
         filterDealsCount.addEventListener('input', () => {
             page = 1;
-            renderUsersTable();
+            loadUsers();
         });
         filterTurnover.addEventListener('input', () => {
             page = 1;
-            renderUsersTable();
+            loadUsers();
         });
         filterActivity.addEventListener('input', () => {
             page = 1;
-            renderUsersTable();
+            loadUsers();
         });
         prevBtn.onclick = () => {
             if (page > 1) {
                 page--;
-                renderUsersTable();
+                loadUsers();
             }
         };
         nextBtn.onclick = () => {
-            if (page < Math.ceil(filterUsers().length / perPage)) {
+            if (page < paginationInfo.totalPages) {
                 page++;
-                renderUsersTable();
+                loadUsers();
             }
         };
 
-        function filterUsers() {
-            const term = searchInput.value.trim().toLowerCase();
-            const regDateFilter = filterRegistrationDate.value ? new Date(filterRegistrationDate.value).toISOString().split('T')[0] : null;
-            const dealsCountFilter = filterDealsCount.value ? parseInt(filterDealsCount.value, 10) : null;
-            const turnoverFilter = filterTurnover.value ? parseFloat(filterTurnover.value) : null;
-            const activityFilter = filterActivity.value ? new Date(filterActivity.value).toISOString().split('T')[0] : null;
-
-            return users.filter(u => {
-                const matchesSearch = term ? (
-                    u.id.toString().includes(term) ||
-                    (u.username && u.username.toLowerCase().includes(term))
-                ) : true;
-
-                const matchesRegDate = regDateFilter ? (
-                    u.registrationDate && u.registrationDate.split('T')[0] === regDateFilter
-                ) : true;
-
-                const userDeals = deals.filter(d =>
-                    (d.userId === u.id || String(d.userId) === String(u.id)) &&
-                    d.status === 'completed' &&
-                    (d.rubAmount || d.amount)
-                );
-                const dealsCount = userDeals.length;
-                const matchesDealsCount = dealsCountFilter !== null ? dealsCount >= dealsCountFilter : true;
-
-                const turnover = userDeals.reduce((sum, d) => sum + (d.rubAmount || d.amount || 0), 0);
-                const matchesTurnover = turnoverFilter !== null ? turnover >= turnoverFilter : true;
-
-                const userWithdrawals = withdrawals.filter(w => w.userId === u.id && w.status === 'completed');
-                const latestActivity = [...userDeals, ...userWithdrawals]
-                    .map(item => new Date(item.timestamp))
-                    .sort((a, b) => b - a)[0];
-                const matchesActivity = activityFilter ? (
-                    latestActivity && latestActivity.toISOString().split('T')[0] >= activityFilter
-                ) : true;
-
-                return matchesSearch && matchesRegDate && matchesDealsCount && matchesTurnover && matchesActivity;
-            });
-        }
 
         async function getCommissionDiscount(turnover) {
             try {
@@ -145,25 +130,19 @@ function initializeUsers() {
             }
         }
 
-        async function renderUsersTable() {
-            const list = filterUsers();
-            const total = list.length;
-            const start = (page - 1) * perPage;
-            const slice = list.slice(start, start + perPage);
-
+        async function renderUsersTable(users) {
             tbody.innerHTML = '';
-            if (total === 0) {
+            if (!users || users.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="10">На данный момент информация отсутствует</td></tr>';
+                pageInfo.textContent = `Страница 0 из 0`;
+                prevBtn.disabled = true;
+                nextBtn.disabled = true;
                 return;
             }
 
-            for (const u of slice) {
-                const userDeals = deals.filter(d =>
-                    (d.userId === u.id || String(d.userId) === String(u.id)) &&
-                    d.status === 'completed' &&
-                    (d.rubAmount || d.amount)
-                );
-                const turnover = userDeals.reduce((sum, d) => sum + (d.rubAmount || d.amount || 0), 0);
+            for (const u of users) {
+                const userDeals = u._stats?.userDeals || [];
+                const turnover = u._stats?.turnover || 0;
                 const periods = ['day', 'week', 'month', 'year'];
                 const getPeriodFilter = (period) => {
                     const now = new Date();
@@ -216,14 +195,13 @@ function initializeUsers() {
                 tbody.appendChild(tr);
             }
 
-            pageInfo.textContent = `Страница ${page} из ${Math.ceil(total / perPage) || 1}`;
-            prevBtn.disabled = page === 1;
-            nextBtn.disabled = page >= Math.ceil(total / perPage);
+            pageInfo.textContent = `Страница ${paginationInfo.page || page} из ${paginationInfo.totalPages || 1} (Всего: ${paginationInfo.total || 0})`;
+            prevBtn.disabled = page <= 1;
+            nextBtn.disabled = page >= paginationInfo.totalPages;
 
             document.querySelectorAll('.delete-user').forEach(b => b.onclick = () => {
                 api.delete(`/users/${b.dataset.id}`).then(() => {
-                    users = users.filter(u => u.id !== +b.dataset.id);
-                    renderUsersTable();
+                    loadUsers();
                 }).catch(err => {
                     if (err.response?.status === 401 || err.response?.status === 403) {
                         localStorage.removeItem('token');
@@ -232,10 +210,7 @@ function initializeUsers() {
                 });
             });
             document.querySelectorAll('.block-toggle').forEach(cb => cb.onchange = () => {
-                api.put(`/users/${cb.dataset.id}`, { isBlocked: cb.checked }).then(() => {
-                    const user = users.find(u => u.id === +cb.dataset.id);
-                    if (user) user.isBlocked = cb.checked;
-                }).catch(err => {
+                api.put(`/users/${cb.dataset.id}`, { isBlocked: cb.checked }).catch(err => {
                     if (err.response?.status === 401 || err.response?.status === 403) {
                         localStorage.removeItem('token');
                         window.location.href = '/login';
@@ -245,10 +220,7 @@ function initializeUsers() {
             document.querySelectorAll('.balance-input').forEach(inp => inp.onblur = () => {
                 const id = inp.dataset.id;
                 const val = parseFloat(inp.value) || 0;
-                api.put(`/users/${id}`, { balance: val }).then(() => {
-                    const user = users.find(u => u.id === +id);
-                    if (user) user.balance = val;
-                }).catch(err => {
+                api.put(`/users/${id}`, { balance: val }).catch(err => {
                     if (err.response?.status === 401 || err.response?.status === 403) {
                         localStorage.removeItem('token');
                         window.location.href = '/login';

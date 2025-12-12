@@ -76,18 +76,19 @@ function initializeConfig() {
             credentialsForm.parentNode.insertBefore(statusToggle, credentialsForm.nextSibling);
         }
 
-        const processingToggle = document.createElement('div');
-        processingToggle.className = 'toggle-container';
-        processingToggle.innerHTML = `
-            <label class="switch">
-                <input type="checkbox" id="processingStatusToggle" />
-                <span class="slider round"></span>
-            </label>
-            <span class="toggle-label">Статус процессинга</span>
+        const processingSelect = document.createElement('div');
+        processingSelect.className = 'toggle-container';
+        processingSelect.innerHTML = `
+            <label for="processingTypeSelect" class="toggle-label">Тип процессинга:</label>
+            <select id="processingTypeSelect" class="config-select">
+                <option value="none">Без процессинга</option>
+                <option value="ros_trust_processing">Ros Trust Processing</option>
+                <option value="settlex_processing">Settlex Processing</option>
+            </select>
         `;
         if (credentialsForm) {
-            credentialsForm.parentNode.insertBefore(processingToggle, credentialsForm.nextSibling);
-            credentialsForm.parentNode.insertBefore(statusToggle, processingToggle); // Ensure bot status is above
+            credentialsForm.parentNode.insertBefore(processingSelect, credentialsForm.nextSibling);
+            credentialsForm.parentNode.insertBefore(statusToggle, processingSelect);
         }
 
         async function updateBotStatus() {
@@ -105,9 +106,9 @@ function initializeConfig() {
         async function updateProcessingStatus() {
             try {
                 const response = await api.get('/processing/status');
-                const toggle = document.getElementById('processingStatusToggle');
-                if (toggle) {
-                    toggle.checked = response.data.processingEnabled;
+                const select = document.getElementById('processingTypeSelect');
+                if (select) {
+                    select.value = response.data.processingType || 'none';
                 }
             } catch (err) {
                 console.error('Error fetching processing status:', err);
@@ -127,14 +128,14 @@ function initializeConfig() {
             });
         }
 
-        const processingToggleInput = document.getElementById('processingStatusToggle');
-        if (processingToggleInput) {
-            processingToggleInput.addEventListener('change', async (e) => {
+        const processingTypeSelect = document.getElementById('processingTypeSelect');
+        if (processingTypeSelect) {
+            processingTypeSelect.addEventListener('change', async (e) => {
                 try {
-                    const newStatus = e.target.checked;
-                    await api.post('/processing/toggle', { enabled: newStatus });
+                    const newType = e.target.value;
+                    await api.post('/processing/type', { type: newType });
                 } catch (err) {
-                    console.error('Error updating processing status:', err);
+                    console.error('Error updating processing type:', err);
                     await updateProcessingStatus();
                 }
             });

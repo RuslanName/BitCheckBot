@@ -1,6 +1,7 @@
 const fs = require('fs-extra');
 const path = require('path');
-const { DATA_PATH } = require("./constants");
+const { DATA_PATH } = require('../config/constants');
+const { loadJson } = require('../utils/storage_utils');
 
 function customRandom(seed) {
     const x = Math.sin(seed) * 10000;
@@ -23,19 +24,6 @@ function selectWinners(users, seed, numWinners) {
     }
 
     return winners;
-}
-
-function loadJson(name) {
-    const filePath = path.join(DATA_PATH, 'database', `${name}.json`);
-    try {
-        if (!fs.existsSync(filePath)) {
-            return [];
-        }
-        return fs.readJsonSync(filePath);
-    } catch (err) {
-        console.error(`Error loading ${name}.json:`, err.message);
-        return [];
-    }
 }
 
 function getEligibleUsers(raffle) {
@@ -92,3 +80,4 @@ ${winners.length > 0 ? winners.map((winner, index) => `${index + 1}) @${winner.u
 }
 
 module.exports = { generateRaffleResults };
+

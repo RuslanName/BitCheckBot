@@ -36,58 +36,78 @@ function initializeDeals() {
         `;
         filterGroup.appendChild(bulkActionContainer);
 
-        let deals = [];
         const users = [];
         let page = 1;
-        let perPage = parseInt(perPageSelect.value) || 25;
+        let perPage = parseInt(perPageSelect.value) || 50;
         let activeTab = 'open';
         let selectedDeals = new Set();
         let lastSelectedDealId = null;
+        let paginationInfo = { total: 0, totalPages: 0 };
 
-        Promise.all([
-            api.get('/deals'),
-            api.get('/users')
-        ]).then(([dealRes, userRes]) => {
-            const fetchedDeals = Array.isArray(dealRes.data) ? dealRes.data : Object.values(dealRes.data);
-            users.push(...(Array.isArray(userRes.data) ? userRes.data : []));
-            if (userRole === 'admin' && userCurrency) {
-                deals.push(...fetchedDeals.filter(d => d.currency === userCurrency));
-            } else {
-                deals.push(...fetchedDeals);
+        function loadDeals() {
+            const params = {
+                page,
+                perPage,
+                status: activeTab
+            };
+            const search = searchInput.value.trim();
+            if (search) {
+                params.search = search;
             }
-            renderDealsTable();
-        }).catch(err => {
-            console.error('Error loading deals:', err);
-            if (err.response?.status === 401 || err.response?.status === 403) {
-                localStorage.removeItem('token');
-                window.location.href = '/login';
-            } else {
-                tbody.innerHTML = '<tr><td colspan="12">Ошибка загрузки информации</td></tr>';
-            }
-        });
 
+            tbody.innerHTML = '<tr><td colspan="12">Загрузка...</td></tr>';
+
+            Promise.all([
+                api.get('/deals', { params }),
+                api.get('/users')
+            ]).then(([dealRes, userRes]) => {
+                const response = dealRes.data;
+                const deals = response.data || [];
+                paginationInfo = response.pagination || { total: 0, totalPages: 0, page: 1, perPage: 50 };
+                
+                users.length = 0;
+                users.push(...(Array.isArray(userRes.data) ? userRes.data : []));
+                
+                renderDealsTable(deals);
+            }).catch(err => {
+                console.error('Error loading deals:', err);
+                if (err.response?.status === 401 || err.response?.status === 403) {
+                    localStorage.removeItem('token');
+                    window.location.href = '/login';
+                } else {
+                    tbody.innerHTML = '<tr><td colspan="12">Ошибка загрузки информации</td></tr>';
+                }
+            });
+        }
+
+        loadDeals();
+
+        let searchTimeout;
         searchInput.addEventListener('input', () => {
-            page = 1;
-            renderDealsTable();
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(() => {
+                page = 1;
+                loadDeals();
+            }, 300);
         });
 
         perPageSelect.addEventListener('change', (e) => {
-            perPage = parseInt(e.target.value) || 25;
+            perPage = parseInt(e.target.value) || 50;
             page = 1;
-            renderDealsTable();
+            loadDeals();
         });
 
         prevBtn.onclick = () => {
             if (page > 1) {
                 page--;
-                renderDealsTable();
+                loadDeals();
             }
         };
 
         nextBtn.onclick = () => {
-            if (page < Math.ceil(filterDeals().length / perPage)) {
+            if (page < paginationInfo.totalPages) {
                 page++;
-                renderDealsTable();
+                loadDeals();
             }
         };
 
@@ -97,7 +117,7 @@ function initializeDeals() {
                 button.classList.add('active');
                 activeTab = button.dataset.status;
                 page = 1;
-                renderDealsTable();
+                loadDeals();
             });
         });
 
@@ -106,10 +126,9 @@ function initializeDeals() {
                 await Promise.all([...selectedDeals].map(dealId =>
                     api.patch(`/deals/${dealId}/complete`)
                 ));
-                deals = deals.map(d => selectedDeals.has(d.id) ? { ...d, status: 'completed' } : d);
                 selectedDeals.clear();
                 bulkActionContainer.style.display = 'none';
-                renderDealsTable();
+                loadDeals();
             } catch (err) {
                 console.error('Error completing selected deals:', err);
                 if (err.response?.status === 401 || err.response?.status === 403) {
@@ -124,10 +143,9 @@ function initializeDeals() {
                 await Promise.all([...selectedDeals].map(dealId =>
                     api.delete(`/deals/${dealId}`)
                 ));
-                deals = deals.filter(d => !selectedDeals.has(d.id));
                 selectedDeals.clear();
                 bulkActionContainer.style.display = 'none';
-                renderDealsTable();
+                loadDeals();
             } catch (err) {
                 console.error('Error deleting selected deals:', err);
                 if (err.response?.status === 401 || err.response?.status === 403) {
@@ -140,49 +158,23 @@ function initializeDeals() {
         bulkActionContainer.querySelector('#cancelSelection').onclick = () => {
             selectedDeals.clear();
             bulkActionContainer.style.display = 'none';
-            renderDealsTable();
+            loadDeals();
         };
 
-        function filterDeals() {
-            const term = searchInput.value.trim().toLowerCase();
-            return deals.filter(d => {
-                if (!d || d.status === 'draft') return false;
-                if (activeTab === 'open' && d.status !== 'pending') return false;
-                if (activeTab === 'completed' && d.status !== 'completed') return false;
-                if (activeTab === 'expired' && d.status !== 'expired') return false;
-                const user = users.find(u => u.id === d.userId) || {};
-                return (
-                    (d.id && d.id.toString().includes(term)) ||
-                    (d.userId && d.userId.toString().includes(term)) ||
-                    (user.username && user.username.toLowerCase().includes(term))
-                );
-            });
-        }
-
-        function renderDealsTable() {
-            const list = filterDeals();
-            list.sort((a, b) => {
-                if (a.status === 'pending' && b.status === 'completed') return -1;
-                if (a.status === 'completed' && b.status === 'pending') return 1;
-                if (a.priority === 'elevated' && b.priority !== 'elevated') return -1;
-                if (a.priority !== 'elevated' && b.priority === 'elevated') return 1;
-                return 0;
-            });
-
-            const total = list.length;
-            const start = (page - 1) * perPage;
-            const slice = list.slice(start, start + perPage);
-
+        function renderDealsTable(deals) {
             tbody.innerHTML = '';
-            if (total === 0) {
+            if (!deals || deals.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="12">На данный момент информация отсутствует</td></tr>';
                 bulkActionContainer.style.display = 'none';
                 const table = document.querySelector('table');
                 table.style.userSelect = 'auto';
+                pageInfo.textContent = `Страница 0 из 0`;
+                prevBtn.disabled = true;
+                nextBtn.disabled = true;
                 return;
             }
 
-            slice.forEach(d => {
+            deals.forEach(d => {
                 const user = users.find(u => u.id === d.userId) || {};
                 const tr = document.createElement('tr');
                 const isSelected = selectedDeals.has(d.id);
@@ -203,7 +195,7 @@ function initializeDeals() {
                     <td>${formatDateTime(d.timestamp)}</td>
                     <td>
                         ${d.status === 'completed' || d.status === 'expired'
-                    ? '<button class="complete-deal" data-id="${d.id}" disabled>Завершено</button>'
+                    ? `<button class="complete-deal" data-id="${d.id}" disabled>Завершено</button>`
                     : `
                                 <button class="delete-deal" data-id="${d.id}">Удалить</button>
                                 <button class="complete-deal" data-id="${d.id}">Завершить</button>
@@ -213,9 +205,9 @@ function initializeDeals() {
                 tbody.appendChild(tr);
             });
 
-            pageInfo.textContent = `Страница ${page} из ${Math.ceil(total / perPage) || 1}`;
+            pageInfo.textContent = `Страница ${paginationInfo.page || page} из ${paginationInfo.totalPages || 1}`;
             prevBtn.disabled = page === 1;
-            nextBtn.disabled = page >= Math.ceil(total / perPage);
+            nextBtn.disabled = page >= paginationInfo.totalPages;
 
             bulkActionContainer.style.display = selectedDeals.size > 0 ? 'flex' : 'none';
 
@@ -223,6 +215,7 @@ function initializeDeals() {
             allRows.forEach(tr => {
                 const dealId = tr.dataset.id;
                 const deal = deals.find(d => d.id === dealId);
+                if (!deal) return;
                 const isSelected = selectedDeals.has(dealId);
                 const isElevated = deal.priority === 'elevated';
 
@@ -253,7 +246,7 @@ function initializeDeals() {
                             for (let i = startIndex; i <= endIndex; i++) {
                                 const rowDealId = allRows[i].dataset.id;
                                 const rowDeal = deals.find(d => d.id === rowDealId);
-                                if (rowDeal.status !== 'completed' && rowDeal.status !== 'expired' && !selectedDeals.has(rowDealId)) {
+                                if (rowDeal && rowDeal.status !== 'completed' && rowDeal.status !== 'expired' && !selectedDeals.has(rowDealId)) {
                                     selectedDeals.add(rowDealId);
                                     allRows[i].classList.add('selected');
                                 }
@@ -281,9 +274,8 @@ function initializeDeals() {
                 btn.onclick = () => {
                     const dealId = btn.dataset.id;
                     api.delete(`/deals/${dealId}`).then(() => {
-                        deals = deals.filter(d => d.id !== dealId);
                         selectedDeals.delete(dealId);
-                        renderDealsTable();
+                        loadDeals();
                     }).catch(err => {
                         if (err.response?.status === 401 || err.response?.status === 403) {
                             localStorage.removeItem('token');
@@ -299,9 +291,8 @@ function initializeDeals() {
                 btn.onclick = () => {
                     const dealId = btn.dataset.id;
                     api.patch(`/deals/${dealId}/complete`).then(() => {
-                        deals = deals.map(d => d.id === dealId ? { ...d, status: 'completed' } : d);
                         selectedDeals.delete(dealId);
-                        renderDealsTable();
+                        loadDeals();
                     }).catch(err => {
                         if (err.response?.status === 401 || err.response?.status === 403) {
                             localStorage.removeItem('token');

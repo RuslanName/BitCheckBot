@@ -1,6 +1,6 @@
 const path = require('path');
 const fs = require('fs-extra');
-const { DATA_PATH } = require("./constants");
+const { DATA_PATH } = require("../config/constants");
 
 function loadJson(name) {
     const filePath = path.join(DATA_PATH, 'database', `${name}.json`);
@@ -25,3 +25,4 @@ function saveJson(name, data) {
 }
 
 module.exports = { loadJson, saveJson };
+

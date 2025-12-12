@@ -1,0 +1,134 @@
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 16px;
+    font-size: 14px;
+    user-select: auto;
+    table-layout: auto;
+    min-width: 100%;
+}
+
+th, td {
+    padding: 12px 16px;
+    border: 1px solid #dee2e6;
+    text-align: left;
+    vertical-align: middle;
+    white-space: normal;
+    overflow: visible;
+    max-width: 200px;
+}
+
+th {
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    color: #495057;
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 13px;
+    letter-spacing: 0.5px;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+th[title], td[title] {
+    cursor: help;
+}
+
+tbody tr:nth-child(even) {
+    background: #f8f9fa;
+}
+
+tbody tr:hover {
+    background: #e3f2fd;
+    transition: background 0.2s ease;
+}
+
+tbody tr.selected {
+    background: #d1e7ff;
+}
+
+tbody tr.priority-elevated {
+    background: #ffe5cc;
+}
+
+tbody tr.priority-elevated:hover {
+    background: #ffdbb3;
+}
+
+tbody tr.priority-elevated.selected {
+    background: #ffcc99;
+}
+
+table button {
+    padding: 6px 10px;
+    margin: 2px;
+    min-height: 32px;
+    font-size: 14px;
+    white-space: normal;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+    box-sizing: border-box;
+    display: inline-block;
+    width: 100%;
+}
+
+table input[type="text"],
+table input[type="number"],
+table input[type="date"],
+table select {
+    padding: 6px 10px;
+    margin: 2px;
+    font-size: 14px;
+    min-height: 32px;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+table textarea {
+    padding: 6px 10px;
+    margin: 2px;
+    font-size: 14px;
+    min-height: 60px;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    resize: vertical;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+table input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    margin: 2px;
+}
+
+td:has(button), td:has(input), td:has(select) {
+    white-space: normal;
+    padding: 8px 12px;
+    vertical-align: middle;
+}
+
+td:not(:has(button)):not(:has(input)):not(:has(select)) {
+    white-space: normal;
+    word-break: break-word;
+    overflow-wrap: break-word;
+    max-width: 150px;
+    hyphens: none;
+}
+
+.array-display {
+    display: block;
+    margin-bottom: 8px;
+}
+
+.array-cell {
+    position: relative;
+}
+
+.edit-array-btn {
+    margin-top: 8px;
+}
+

@@ -24,3 +24,4 @@ async function generateCaptcha() {
 }
 
 module.exports = { generateCaptcha };
+

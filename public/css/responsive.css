@@ -1,0 +1,259 @@
+@media (max-width: 1024px) {
+    .container {
+        flex-direction: column;
+    }
+
+    nav {
+        width: 100%;
+        flex-direction: row;
+        overflow-x: auto;
+        padding: 0;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        flex-wrap: nowrap;
+        white-space: nowrap;
+        position: static;
+    }
+
+    nav a {
+        white-space: nowrap;
+        min-width: 120px;
+        text-align: center;
+        padding: 16px 20px;
+        flex-shrink: 0;
+        border-bottom: none;
+        border-right: 1px solid rgba(52, 73, 94, 0.5);
+    }
+
+    nav a:last-child {
+        border-right: none;
+    }
+
+    nav a:before {
+        width: 100%;
+        height: 3px;
+        top: auto;
+        bottom: 0;
+        left: 0;
+        transform: scaleX(0);
+    }
+
+    nav a.active:before,
+    nav a:hover:before {
+        transform: scaleX(1);
+    }
+
+    nav a.active,
+    nav a:hover {
+        padding-left: 20px;
+        background: rgba(52, 73, 94, 0.8);
+    }
+
+    main {
+        padding: 16px;
+        margin-left: 0;
+    }
+
+    h1, h2 {
+        font-size: 22px;
+    }
+}
+
+@media (max-width: 768px) {
+    main {
+        padding: 12px;
+    }
+
+    section {
+        padding: 16px;
+        margin-bottom: 16px;
+        border-radius: 8px;
+    }
+
+    .header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 16px;
+    }
+
+    .controls {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 12px;
+    }
+
+    .filter-group {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+    }
+
+    .controls input[type="text"],
+    .controls input[type="number"],
+    .controls input[type="date"],
+    .controls select {
+        width: 100%;
+        min-width: auto;
+    }
+
+    table {
+        font-size: 14px;
+    }
+
+    table textarea {
+        padding: 6px 10px;
+        margin: 2px;
+        font-size: 14px;
+        min-height: 60px;
+        width: 100%;
+        max-width: 100%;
+        box-sizing: border-box;
+        resize: vertical;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+    }
+
+    th, td {
+        padding: 10px 12px;
+        white-space: normal;
+        overflow: visible;
+        min-width: 60px;
+    }
+
+    td:has(button), td:has(input), td:has(select) {
+        white-space: nowrap;
+        padding: 8px 10px;
+        vertical-align: middle;
+    }
+
+    td:not(:has(button)):not(:has(input)):not(:has(select)) {
+        white-space: normal;
+        word-break: break-word;
+        overflow-wrap: break-word;
+        max-width: 100px;
+    }
+
+    .pagination {
+        justify-content: center;
+        flex-wrap: wrap;
+    }
+
+    .form-container {
+        padding: 16px;
+        margin-bottom: 16px;
+    }
+
+    .modal {
+        padding: 12px;
+    }
+
+    .modal-content {
+        padding: 20px;
+        border-radius: 12px;
+        max-height: 90vh;
+    }
+
+    button {
+        min-height: 40px;
+        font-size: 14px;
+        padding: 10px 14px;
+    }
+
+    .pagination button {
+        min-height: 40px;
+        padding: 10px 14px;
+        font-size: 14px;
+    }
+
+    input[type="text"],
+    input[type="password"],
+    input[type="number"],
+    input[type="date"],
+    select,
+    textarea {
+        font-size: 14px;
+        min-height: 40px;
+        padding: 10px 14px;
+    }
+
+    .file-upload-wrapper {
+        padding: 24px 16px;
+    }
+
+    .array-item {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+    }
+
+    nav {
+        scrollbar-width: none;
+        -ms-overflow-style: none;
+    }
+
+    nav::-webkit-scrollbar {
+        display: none;
+    }
+
+    nav a {
+        min-width: 100px;
+        font-size: 14px;
+        padding: 12px 16px;
+    }
+}
+
+@media (max-width: 480px) {
+    h1, h2 {
+        font-size: 20px;
+    }
+
+    nav a {
+        min-width: 80px;
+        padding: 12px 12px;
+        font-size: 13px;
+    }
+
+    section {
+        padding: 12px;
+    }
+
+    .form-container {
+        padding: 12px;
+    }
+
+    .modal-content {
+        padding: 16px;
+    }
+
+    th, td {
+        padding: 8px 10px;
+        font-size: 13px;
+        white-space: normal;
+        overflow: visible;
+        min-width: 50px;
+    }
+
+    td:has(button), td:has(input), td:has(select) {
+        white-space: nowrap;
+        padding: 6px 8px;
+        vertical-align: middle;
+    }
+
+    td:not(:has(button)):not(:has(input)):not(:has(select)) {
+        white-space: normal;
+        word-break: break-word;
+        overflow-wrap: break-word;
+        max-width: 80px;
+    }
+
+    button {
+        margin: 2px;
+        padding: 8px 12px;
+    }
+
+    .pagination button {
+        min-width: 36px;
+        padding: 8px 12px;
+        font-size: 13px;
+    }
+}
+

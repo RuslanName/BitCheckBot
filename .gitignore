@@ -2,7 +2,8 @@ node_modules
 .idea
 .gitignore
 .env
+test
 data/database
 data/files
 data/images/broadcasts
-test.js
+nginx_setup.md

@@ -1,0 +1,104 @@
+.controls {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 20px;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.filter-group {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.controls input[type="text"],
+.controls input[type="number"],
+.controls input[type="date"],
+.controls select {
+    padding: 8px 12px;
+    border: 2px solid #e9ecef;
+    border-radius: 8px;
+    font-size: 14px;
+    transition: all 0.3s ease;
+    background: #fff;
+    font-family: inherit;
+    box-sizing: border-box;
+    min-height: 36px;
+}
+
+.controls input[type="text"]:focus,
+.controls input[type="number"]:focus,
+.controls input[type="date"]:focus,
+.controls select:focus {
+    outline: none;
+    border-color: #3498db;
+    box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+}
+
+.currency-select {
+    padding: 10px 12px;
+    border: 2px solid #e9ecef;
+    border-radius: 8px;
+    font-size: 14px;
+    background: #fff;
+    cursor: pointer;
+}
+
+.controls input[type="text"] {
+    min-width: 200px;
+}
+
+.controls input[type="number"],
+.controls input[type="date"] {
+    min-width: 150px;
+}
+
+.controls select {
+    min-width: 100px;
+}
+
+.pagination {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 8px;
+    margin-top: 20px;
+    flex-wrap: wrap;
+}
+
+.pagination button {
+    padding: 8px 12px;
+    border: 2px solid #3498db;
+    background: #fff;
+    color: #3498db;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 500;
+    transition: all 0.3s ease;
+    min-width: 36px;
+    min-height: 36px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+}
+
+.pagination button:hover:not(:disabled) {
+    background: #3498db;
+    color: #fff;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(52, 152, 219, 0.3);
+}
+
+.pagination button:disabled {
+    background: #f8f9fa;
+    color: #95a5a6;
+    border-color: #e9ecef;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
