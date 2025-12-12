@@ -3079,15 +3079,27 @@ main_bot.catch((err, ctx) => {
     console.error(`Telegraf error for update ${ctx.update.update_id}:`, err);
 });
 
-main_bot.launch().then(() => {
-    console.log('Bot started');
-}).catch(err => {
-    console.error('Error launching bot:', err.message);
+function getBot() {
+    return main_bot;
+}
+
+async function stopBot() {
+    try {
+        await main_bot.telegram.deleteWebhook();
+        console.log('Webhook удален, бот остановлен');
+    } catch (error) {
+        console.error('Ошибка при остановке бота:', error.message);
+    }
+}
+
+process.once('SIGINT', async () => {
+    await stopBot();
+    process.exit(0);
 });
 
-process.once('SIGINT', () => {
-    main_bot.stop('SIGINT');
+process.once('SIGTERM', async () => {
+    await stopBot();
+    process.exit(0);
 });
-process.once('SIGTERM', () => {
-    main_bot.stop('SIGTERM');
-});
+
+module.exports = { getBot, stopBot };
