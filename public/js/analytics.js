@@ -45,25 +45,31 @@ function initializeAnalytics() {
         function getPeriodFilter(period) {
             const now = new Date();
             let startDate = new Date(now);
+            
+            startDate.setHours(0, 0, 0, 0);
 
             switch (period) {
                 case 'day':
-                    startDate.setDate(now.getDate() - 1);
+                    startDate.setDate(now.getDate());
                     break;
                 case 'week':
-                    startDate.setDate(now.getDate() - 7);
+                    startDate.setDate(now.getDate() - 6);
                     break;
                 case 'month':
-                    startDate.setDate(now.getDate() - 30);
+                    startDate.setDate(now.getDate() - 29);
                     break;
                 case 'year':
-                    startDate.setDate(now.getDate() - 365);
+                    startDate.setDate(now.getDate() - 364);
                     break;
                 default:
                     startDate = new Date(0);
             }
 
-            return item => new Date(item.timestamp) >= startDate;
+            return item => {
+                const itemDate = new Date(item.timestamp);
+                itemDate.setHours(0, 0, 0, 0);
+                return itemDate >= startDate;
+            };
         }
 
         function renderAnalytics() {
@@ -71,7 +77,7 @@ function initializeAnalytics() {
             periods.forEach(period => {
                 const completedDeals = deals.filter(d => d.status === 'completed' && getPeriodFilter(period)(d));
                 const dealCount = completedDeals.length;
-                const dealAmount = completedDeals.reduce((sum, d) => sum + (d.rubAmount || 0), 0);
+                const dealAmount = completedDeals.reduce((sum, d) => sum + (d.total || d.rubAmount || 0), 0);
                 document.getElementById(`deals${period.charAt(0).toUpperCase() + period.slice(1)}Count`).textContent = dealCount;
                 document.getElementById(`deals${period.charAt(0).toUpperCase() + period.slice(1)}Amount`).textContent = dealAmount.toFixed(2);
             });
@@ -83,7 +89,10 @@ function initializeAnalytics() {
             });
 
             periods.forEach(period => {
-                const registeredUsers = users.filter(u => getPeriodFilter(period)({ timestamp: u.registrationDate }));
+                const registeredUsers = users.filter(u => {
+                    if (!u.registrationDate) return false;
+                    return getPeriodFilter(period)({ timestamp: u.registrationDate });
+                });
                 document.getElementById(`users${period.charAt(0).toUpperCase() + period.slice(1)}`).textContent = registeredUsers.length;
             });
         }
