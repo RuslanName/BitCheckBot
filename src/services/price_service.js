@@ -50,7 +50,6 @@ function getLastPriceUpdate() {
 }
 
 module.exports = {
-    updatePrices,
     getBtcRubPrice,
     getLtcRubPrice,
     getLastPriceUpdate

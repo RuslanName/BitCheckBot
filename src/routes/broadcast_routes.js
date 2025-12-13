@@ -25,7 +25,7 @@ const upload = multer({
     fileFilter: (req, file, cb) => {
         const ext = path.extname(file.originalname).toLowerCase();
         if (ext !== '.png' && ext !== '.jpg' && ext !== '.jpeg') {
-            return cb(new Error('Only PNG, JPG, and JPEG files are allowed'));
+            return cb(new Error('Разрешены только файлы PNG, JPG и JPEG'));
         }
         cb(null, true);
     },
@@ -37,7 +37,7 @@ router.get('/broadcasts', authenticateToken, restrictTo('mainAdmin'), (req, res)
         res.json(loadJson('broadcasts'));
     } catch (err) {
         console.error('Error fetching broadcasts:', err.message);
-        res.status(500).json({ error: 'Internal Server Error' });
+        res.status(500).json({ error: 'Внутренняя ошибка сервера' });
     }
 });
 
@@ -63,7 +63,7 @@ router.post('/broadcasts', authenticateToken, restrictTo('mainAdmin'), upload.si
         res.status(201).json(item);
     } catch (err) {
         console.error('Error creating broadcast:', err.message);
-        res.status(500).json({ error: 'Internal Server Error' });
+        res.status(500).json({ error: 'Внутренняя ошибка сервера' });
     }
 });
 
@@ -101,7 +101,7 @@ router.put('/broadcasts/:id', authenticateToken, restrictTo('mainAdmin'), upload
         res.json(list[idx]);
     } catch (err) {
         console.error('Error updating broadcast:', err.message);
-        res.status(500).json({ error: 'Internal Server Error' });
+        res.status(500).json({ error: 'Внутренняя ошибка сервера' });
     }
 });
 
@@ -118,7 +118,7 @@ router.delete('/broadcasts/:id', authenticateToken, restrictTo('mainAdmin'), (re
         res.sendStatus(204);
     } catch (err) {
         console.error('Error deleting broadcast:', err.message);
-        res.status(500).json({ error: 'Internal Server Error' });
+        res.status(500).json({ error: 'Внутренняя ошибка сервера' });
     }
 });
 

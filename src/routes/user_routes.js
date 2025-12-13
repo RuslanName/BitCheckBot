@@ -97,7 +97,7 @@ router.get('/users', authenticateToken, (req, res) => {
         });
     } catch (err) {
         console.error('Error fetching users:', err.message);
-        res.status(500).json({ error: 'Internal Server Error' });
+        res.status(500).json({ error: 'Внутренняя ошибка сервера' });
     }
 });
 
@@ -136,7 +136,21 @@ router.delete('/users/:id', authenticateToken, restrictTo('mainAdmin'), (req, re
         res.sendStatus(204);
     } catch (err) {
         console.error('Error deleting user:', err.message);
-        res.status(500).json({ error: 'Internal Server Error' });
+        res.status(500).json({ error: 'Внутренняя ошибка сервера' });
+    }
+});
+
+router.get('/users/analytics', authenticateToken, (req, res) => {
+    try {
+        let users = loadJson('users');
+        if (!Array.isArray(users)) {
+            users = Object.values(users);
+        }
+
+        res.json(users);
+    } catch (err) {
+        console.error('Error fetching users for analytics:', err.message);
+        res.status(500).json({ error: 'Внутренняя ошибка сервера' });
     }
 });
 

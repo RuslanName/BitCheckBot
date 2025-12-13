@@ -33,7 +33,7 @@ router.get('/withdrawals', authenticateToken, restrictTo('mainAdmin'), async (re
         res.json(data);
     } catch (err) {
         console.error('Error fetching withdrawals:', err.message);
-        res.status(500).json({ error: 'Internal Server Error' });
+        res.status(500).json({ error: 'Внутренняя ошибка сервера' });
     }
 });
 
@@ -79,7 +79,7 @@ router.patch('/withdrawals/:id/complete', authenticateToken, restrictTo('mainAdm
         res.json(withdrawals[idx]);
     } catch (error) {
         console.error('Error completing withdraw:', error.message);
-        res.status(500).json({ error: 'Internal Server Error' });
+        res.status(500).json({ error: 'Внутренняя ошибка сервера' });
     }
 });
 

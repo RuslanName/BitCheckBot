@@ -16,24 +16,31 @@ function initializeAnalytics() {
         let deals = [];
         let users = [];
 
-        Promise.all([
-            api.get('/deals'),
-            api.get('/users')
-        ]).then(([dealRes, userRes]) => {
-            deals = Array.isArray(dealRes.data) ? dealRes.data : Object.values(dealRes.data);
-            users = Array.isArray(userRes.data) ? userRes.data : [];
-            renderAnalytics();
-        }).catch(err => {
-            console.error('Error loading analytics data:', err);
-            if (err.response?.status === 401 || err.response?.status === 403) {
-                localStorage.removeItem('token');
-                window.location.href = '/login';
-            } else {
-                dealsTable.innerHTML = '<tr><td colspan="3">Ошибка загрузки информации</td></tr>';
-                commissionTable.innerHTML = '<tr><td colspan="2">Ошибка загрузки информации</td></tr>';
-                usersTable.innerHTML = '<tr><td colspan="2">Ошибка загрузки информации</td></tr>';
+        async function loadAllData() {
+            try {
+                const [dealRes, userRes] = await Promise.all([
+                    api.get('/deals/analytics'),
+                    api.get('/users/analytics')
+                ]);
+                
+                deals = Array.isArray(dealRes.data) ? dealRes.data : [];
+                users = Array.isArray(userRes.data) ? userRes.data : [];
+                
+                renderAnalytics();
+            } catch (err) {
+                console.error('Error loading analytics data:', err);
+                if (err.response?.status === 401 || err.response?.status === 403) {
+                    localStorage.removeItem('token');
+                    window.location.href = '/login';
+                } else {
+                    dealsTable.innerHTML = '<tr><td colspan="3">Ошибка загрузки информации</td></tr>';
+                    commissionTable.innerHTML = '<tr><td colspan="2">Ошибка загрузки информации</td></tr>';
+                    usersTable.innerHTML = '<tr><td colspan="2">Ошибка загрузки информации</td></tr>';
+                }
             }
-        });
+        }
+        
+        loadAllData();
 
         function getPeriodFilter(period) {
             const now = new Date();

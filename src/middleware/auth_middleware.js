@@ -8,11 +8,11 @@ function authenticateToken(req, res, next) {
         if (req.originalUrl === '/') {
             return res.redirect('/login');
         }
-        return res.status(401).json({ error: 'Token not provided' });
+        return res.status(401).json({ error: 'Токен не предоставлен' });
     }
 
     jwt.verify(token, JWT_SECRET, (err, user) => {
-        if (err) return res.status(403).json({ error: 'Invalid token' });
+        if (err) return res.status(403).json({ error: 'Неверный токен' });
         req.user = user;
         next();
     });
@@ -21,12 +21,13 @@ function authenticateToken(req, res, next) {
 function restrictTo(...roles) {
     return (req, res, next) => {
         if (!roles.includes(req.user.role)) {
-            return res.status(403).json({ error: 'Access denied' });
+            return res.status(403).json({ error: 'Доступ запрещен' });
         }
         next();
     };
 }
 
 module.exports = { authenticateToken, restrictTo };
+
 
 

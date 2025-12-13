@@ -5,14 +5,13 @@ const path = require('path');
 const cron = require('node-cron');
 const async = require('async');
 const { broadcastEmitter, raffleEmitter } = require('./server');
-const { BIT_CHECK_IMAGE_PATH, CACHE_DURATION, DATA_PATH, MAIN_BOT_TOKEN,
+const { BIT_CHECK_IMAGE_PATH, DATA_PATH, MAIN_BOT_TOKEN,
     PAYMENT_OPTION_NAMES, BIT_CHECK_GROUP_URL, BIT_CHECK_CHAT_URL, POST_SCRIPT
 } = require('./src/config/constants');
 const { MESSAGES } = require('./src/config/messages');
 const {
     getBtcRubPrice,
     getLtcRubPrice,
-    getLastPriceUpdate,
     getCommissionDiscount,
     calculateCommission,
     calculateUserStats,
@@ -22,6 +21,7 @@ const {
     checkIfBlocked,
     getAvailablePaymentDetails,
     checkUnpaidDeals,
+    checkInvoiceStatus,
     generateRaffleResults,
     calculateDealTotals,
     calculateMinMaxAmounts,
@@ -34,26 +34,14 @@ const {
     buildBuyMenuReplyMarkup,
     buildSellMenuMessage,
     buildSellMenuReplyMarkup,
-    buildSellAmountInputMessage,
     buildDealCreatedMessage,
     buildDealReplyMarkup,
     buildPaymentSystemText,
     buildOperatorDealMessage,
     buildOperatorDealReplyMarkup,
-    buildSupportMessage,
-    buildSupportReplyMarkup,
-    buildWithdrawalMessage,
-    buildOperatorWithdrawalMessage,
-    buildOperatorWithdrawalReplyMarkup,
-    buildSupportReplyUserMessage,
-    buildSupportReplyUserReplyMarkup,
     createDealObject,
-    createDealFromExisting,
     buildDealConfirmationMessage,
-    buildDealConfirmationReplyMarkup,
-    buildDealCompletedMessage,
-    buildDealExpiredMessage,
-    buildDealCompletedReplyMarkup
+    buildDealConfirmationReplyMarkup
 } = require('./src/services');
 const {
     loadJson,
@@ -657,7 +645,7 @@ main_bot.use(async (ctx, next) => {
                 const userId = ctx.from.id;
                 const user = users.find(u => u.id === userId);
                 if (!user) {
-                    await sendBitCheckPhoto(ctx.chat.id, { caption: '❌ Вы не зарегистрированы. Используйте /start' });
+                    await sendBitCheckPhoto(ctx.chat.id, { caption: MESSAGES.ERROR_NOT_REGISTERED });
                     return;
                 }
             }
@@ -735,8 +723,6 @@ main_bot.hears('👤 Профиль', async ctx => {
     const user = users.find(u => u.id === userId);
     const priceBTC = await getBtcRubPrice();
     const stats = calculateUserStats(userId);
-    const earningsRub = user.balance * priceBTC;
-    const username = user.username ? `@${user.username}` : 'Нет';
     const referralLink = `https://t.me/${ctx.botInfo.username}?start=ref_${user.referralId}`;
     const profileText = buildProfileMessage(user, stats, priceBTC, referralLink);
     const replyMarkup = buildProfileReplyMarkup();
@@ -932,7 +918,7 @@ main_bot.on('message', async ctx => {
             const captcha = await generateCaptcha();
             const captchaMessage = await ctx.replyWithPhoto(
                 { source: Buffer.from(captcha.data) },
-                { caption: `❌ Неверный код, попробуйте снова! Введите код с картинки 🤖` }
+                { caption: MESSAGES.ERROR_INVALID_CAPTCHA }
             );
             states.pendingCaptcha[id] = {
                 correct: captcha.text,
@@ -957,7 +943,7 @@ main_bot.on('message', async ctx => {
                     console.error(`Error deleting message ${states.pendingUpdateProfile[id].messageId}:`, error.message);
                 }
                 const message = await sendBitCheckPhoto(ctx.chat.id, {
-                    caption: isSell ? '❌ Введите корректные реквизиты' : `❌ Введите корректный адрес кошелька для ${type === 'defaultWalletsBTC' ? 'BTC' : 'LTC'}`
+                    caption: isSell ? MESSAGES.ERROR_INVALID_REQUISITES : MESSAGES.ERROR_INVALID_WALLET_ADDRESS(type === 'defaultWalletsBTC' ? 'BTC' : 'LTC')
                 });
                 states.pendingUpdateProfile[id].messageId = message.message_id;
                 saveJson('states', states);
@@ -1003,10 +989,10 @@ main_bot.on('message', async ctx => {
                         await sendBitCheckPhoto(ctx.chat.id, { caption: MESSAGES.SUPPORT_REPLY_SENT(supportData.targetId) });
                     } catch (error) {
                         console.error(`Error sending response to user ${supportData.targetId}:`, error.message);
-                        await sendBitCheckPhoto(ctx.chat.id, { caption: `❌ Ошибка отправки ответа пользователю ID ${supportData.targetId}` });
+                        await sendBitCheckPhoto(ctx.chat.id, { caption: MESSAGES.ERROR_SUPPORT_SEND_FAILED(supportData.targetId) });
                     }
                 } else {
-                    await sendBitCheckPhoto(ctx.chat.id, { caption: `❌ Пользователь ID ${supportData.targetId} не найден или чат недоступен` });
+                    await sendBitCheckPhoto(ctx.chat.id, { caption: MESSAGES.ERROR_USER_NOT_FOUND_OR_CHAT_INVALID(supportData.targetId) });
                 }
             } else {
                 const u = users.find(u => u.id === id);
@@ -1059,7 +1045,7 @@ main_bot.on('message', async ctx => {
             const deals = loadJson('deals');
             const dealIndex = deals.findIndex(d => d.id === dealId);
             if (dealIndex === -1) {
-                await ctx.reply('❌ Заявка не найдена или уже обработана');
+                await ctx.reply(MESSAGES.ERROR_DEAL_NOT_FOUND_OR_PROCESSED);
                 delete states.pendingTransactionHash[ctx.from.id];
                 saveJson('states', states);
                 return;
@@ -1070,7 +1056,7 @@ main_bot.on('message', async ctx => {
                     caption: `✅ Сделка № ${deal.id} завершена!\n` +
                         `Покупка ${deal.currency}\n` +
                         `Количество: ${deal.cryptoAmount} ${deal.currency}\n\n` +
-                        `🔗 Хеш транзакции:\n<code>${transactionHash}</code>`,
+                        `🔗 Хеш транзакции:\n${transactionHash}`,
                     parse_mode: 'HTML'
                 });
                 deal.status = 'completed';
@@ -1082,7 +1068,7 @@ main_bot.on('message', async ctx => {
                 await ctx.reply('✅ Хеш транзакции успешно отправлен пользователю');
             } catch (error) {
                 console.error('Error sending transaction hash:', error.message);
-                await ctx.reply('❌ Ошибка при отправке хеша транзакции');
+                await ctx.reply(MESSAGES.ERROR_GENERAL);
             }
         }
 
@@ -1099,7 +1085,7 @@ main_bot.on('message', async ctx => {
                     console.error(`Error deleting message ${states.pendingDeal[id].messageId}:`, error.message)
                 }
                 const message = await sendBitCheckPhoto(ctx.chat.id, {
-                    caption: isBuy ? `❌ Введите корректный адрес кошелька для ${dealData.currency}` : `❌ Введите корректные реквизиты для ${dealData.currency}`
+                    caption: isBuy ? MESSAGES.ERROR_INVALID_WALLET_ADDRESS(dealData.currency) : MESSAGES.ERROR_INVALID_REQUISITES
                 })
                 states.pendingDeal[id].messageId = message.message_id
                 saveJson('states', states)
@@ -1198,7 +1184,7 @@ main_bot.on('message', async ctx => {
                     console.error(`Error deleting message ${states.pendingDeal[id].messageId}:`, error.message)
                 }
                 const message = await sendBitCheckPhoto(ctx.chat.id, {
-                    caption: `❌ Введите корректную сумму в RUB или ${currency}\n\n💰 Введите сумму для ${isBuy ? 'покупки' : 'продажи'} ${currency} (в RUB или ${currency})\nМин: ${minAmountRub} RUB (~${minAmountCrypto} ${currency})\nМакс: ${maxAmountRub} RUB (~${maxAmountCrypto} ${currency})`,
+                    caption: `${MESSAGES.ERROR_INVALID_AMOUNT(currency)}\n\n💰 Введите сумму для ${isBuy ? 'покупки' : 'продажи'} ${currency} (в RUB или ${currency})\nМин: ${minAmountRub} RUB (~${minAmountCrypto} ${currency})\nМакс: ${maxAmountRub} RUB (~${maxAmountCrypto} ${currency})`,
                     reply_markup: {
                         inline_keyboard: [[{ text: '❌ Отменить', callback_data: 'cancel_action' }]]
                     }
@@ -1237,7 +1223,7 @@ main_bot.on('message', async ctx => {
                     console.error(`Error deleting message ${states.pendingDeal[id].messageId}:`, error.message)
                 }
                 const message = await sendBitCheckPhoto(ctx.chat.id, {
-                    caption: `❌ Сумма вне допустимого диапазона!\n\n💰 Введите сумму для ${isBuy ? 'покупки' : 'продажи'} ${currency} (в RUB или ${currency})\nМин: ${minAmountRub} RUB (~${minAmountCrypto} ${currency})\nМакс: ${maxAmountRub} RUB (~${maxAmountCrypto} ${currency})`,
+                    caption: MESSAGES.ERROR_AMOUNT_OUT_OF_RANGE(isBuy, currency, minAmountRub, minAmountCrypto, maxAmountRub, maxAmountCrypto),
                     reply_markup: {
                         inline_keyboard: [[{ text: '❌ Отменить', callback_data: 'cancel_action' }]]
                     }
@@ -1300,7 +1286,7 @@ main_bot.on('message', async ctx => {
                     console.error(`Error deleting message ${states.pendingWithdrawal[id].messageId}:`, error.message);
                 }
                 const message = await sendBitCheckPhoto(ctx.chat.id, {
-                    caption: `❌ Введите корректный адрес кошелька для BTC`
+                    caption: MESSAGES.ERROR_INVALID_WALLET_ADDRESS('BTC')
                 });
                 states.pendingWithdrawal[id].messageId = message.message_id;
                 saveJson('states', states);
@@ -1359,7 +1345,7 @@ main_bot.on('message', async ctx => {
                     console.error(`Error deleting message ${states.pendingWithdrawal[id].messageId}:`, error.message);
                 }
                 const message = await sendBitCheckPhoto(ctx.chat.id, {
-                    caption: '❌ Введите корректную сумму в RUB или BTC'
+                    caption: MESSAGES.ERROR_INVALID_AMOUNT('BTC')
                 });
                 states.pendingWithdrawal[id].messageId = message.message_id;
                 saveJson('states', states);
@@ -1451,7 +1437,7 @@ main_bot.on('callback_query', async ctx => {
 
     try {
         if (!data) {
-            await ctx.answerCbQuery('❌ Данные не получены', { show_alert: true });
+            await ctx.answerCbQuery(MESSAGES.ERROR_INVALID_DATA, { show_alert: true });
             return;
         }
 
@@ -1463,7 +1449,7 @@ main_bot.on('callback_query', async ctx => {
             const raffles = loadJson('raffles') || [];
             const raffle = raffles.find(r => r.id === raffleId);
             if (!raffle) {
-                await ctx.answerCbQuery('❌ Розыгрыш не найден', { show_alert: true });
+                await ctx.answerCbQuery(MESSAGES.ERROR_RAFFLE_NOT_FOUND, { show_alert: true });
                 return;
             }
 
@@ -1476,7 +1462,7 @@ main_bot.on('callback_query', async ctx => {
                 await ctx.answerCbQuery('✅ Результаты отправлены', { show_alert: false });
             } catch (error) {
                 console.error(`Error sending raffle results file to user ${from}:`, error.message);
-                await ctx.answerCbQuery('❌ Ошибка при отправке файла', { show_alert: true });
+                await ctx.answerCbQuery(MESSAGES.ERROR_FILE_SEND_FAILED, { show_alert: true });
             }
             return;
         }
@@ -1487,7 +1473,7 @@ main_bot.on('callback_query', async ctx => {
 
             if (!states.pendingDeal[from] || states.pendingDeal[from].action !== 'select_wallet' || !states.pendingDeal[from].walletType) {
                 console.error(`Invalid or missing data for user ${from}`);
-                await ctx.answerCbQuery('❌ Ошибка: некорректные данные', { show_alert: true });
+                await ctx.answerCbQuery(MESSAGES.ERROR_INVALID_DATA, { show_alert: true });
                 return;
             }
 
@@ -1498,7 +1484,7 @@ main_bot.on('callback_query', async ctx => {
 
             if (!wallet) {
                 console.error(`Wallet not found for walletType: ${walletType}, index: ${index}`);
-                await ctx.answerCbQuery('❌ Кошелёк не найден', { show_alert: true });
+                await ctx.answerCbQuery(MESSAGES.ERROR_WALLET_NOT_FOUND, { show_alert: true });
                 return;
             }
 
@@ -1530,7 +1516,7 @@ main_bot.on('callback_query', async ctx => {
 
             if (!states.pendingDeal[from] || !states.pendingDeal[from].currency || !states.pendingDeal[from].walletType) {
                 console.error(`Invalid or missing data for user ${from}`);
-                await ctx.answerCbQuery('❌ Ошибка: некорректные данные', { show_alert: true });
+                await ctx.answerCbQuery(MESSAGES.ERROR_INVALID_DATA, { show_alert: true });
                 return;
             }
 
@@ -1564,7 +1550,7 @@ main_bot.on('callback_query', async ctx => {
 
             if (!states.pendingDeal[from] || !states.pendingDeal[from].walletType || states.pendingDeal[from].action !== 'save_wallet') {
                 console.error(`Invalid or missing data for user ${from}`);
-                await ctx.answerCbQuery('❌ Ошибка: некорректные данные', { show_alert: true });
+                await ctx.answerCbQuery(MESSAGES.ERROR_INVALID_DATA, { show_alert: true });
                 return;
             }
 
@@ -1663,7 +1649,7 @@ main_bot.on('callback_query', async ctx => {
             const updateProfileData = states.pendingUpdateProfile[from];
             if (!updateProfileData || !updateProfileData.walletType || updateProfileData.action !== 'select_delete') {
                 console.error(`Invalid or missing data for user ${from}`);
-                await ctx.answerCbQuery('❌ Ошибка: некорректные данные', { show_alert: true });
+                await ctx.answerCbQuery(MESSAGES.ERROR_INVALID_DATA, { show_alert: true });
                 return;
             }
 
@@ -1706,7 +1692,7 @@ main_bot.on('callback_query', async ctx => {
             const updateProfileData = states.pendingUpdateProfile[from];
             if (!updateProfileData || !updateProfileData.walletType || updateProfileData.action !== 'delete_wallet') {
                 console.error(`Invalid or missing data for user ${from}`);
-                await ctx.answerCbQuery('❌ Ошибка: некорректные данные', { show_alert: true });
+                await ctx.answerCbQuery(MESSAGES.ERROR_INVALID_DATA, { show_alert: true });
                 return;
             }
 
@@ -1765,14 +1751,14 @@ main_bot.on('callback_query', async ctx => {
 
             if (!wallet) {
                 console.error(`Wallet not found for index: ${index}`);
-                await ctx.answerCbQuery('❌ Кошелёк не найден', { show_alert: true });
+                await ctx.answerCbQuery(MESSAGES.ERROR_WALLET_NOT_FOUND, { show_alert: true });
                 return;
             }
 
             const withdrawData = states.pendingWithdrawal[from];
             if (!withdrawData || !withdrawData.amount || !withdrawData.rubAmount) {
                 console.error(`Invalid or missing withdrawal data for user ${from}`);
-                await ctx.answerCbQuery('❌ Ошибка: некорректные данные', { show_alert: true });
+                await ctx.answerCbQuery(MESSAGES.ERROR_INVALID_DATA, { show_alert: true });
                 return;
             }
 
@@ -1837,7 +1823,7 @@ main_bot.on('callback_query', async ctx => {
             const withdrawData = states.pendingWithdrawal[from];
             if (!withdrawData || !withdrawData.amount || !withdrawData.rubAmount) {
                 console.error(`Invalid or missing withdrawal data for user ${from}`);
-                await ctx.answerCbQuery('❌ Ошибка: данные для вывода не найдены', { show_alert: true });
+                await ctx.answerCbQuery(MESSAGES.ERROR_WITHDRAWAL_DATA_NOT_FOUND, { show_alert: true });
                 return;
             }
 
@@ -1875,7 +1861,7 @@ main_bot.on('callback_query', async ctx => {
 
             if (!withdrawData || withdrawData.action !== 'save_withdrawal_wallet' || !withdrawData.withdrawal) {
                 console.error(`Invalid or missing withdrawal data for user ${from}`);
-                await ctx.answerCbQuery('❌ Ошибка: некорректные данные', { show_alert: true });
+                await ctx.answerCbQuery(MESSAGES.ERROR_INVALID_DATA, { show_alert: true });
                 return;
             }
 
@@ -2006,7 +1992,7 @@ main_bot.on('callback_query', async ctx => {
             const user = users.find(u => u.id === from);
             const config = loadJson('config');
             if (!user || !user.balance) {
-                await ctx.answerCbQuery('❌ Нет средств для вывода', { show_alert: false });
+                await ctx.answerCbQuery(MESSAGES.ERROR_NO_FUNDS, { show_alert: false });
                 saveJson('states', states);
                 return;
             }
@@ -2125,7 +2111,7 @@ main_bot.on('callback_query', async ctx => {
 
             if (!dealData || !dealData.currency) {
                 console.error(`Invalid or missing data for user ${from}`);
-                await ctx.answerCbQuery('❌ Ошибка: некорректные данные', { show_alert: true });
+                await ctx.answerCbQuery(MESSAGES.ERROR_INVALID_DATA, { show_alert: true });
                 return;
             }
 
@@ -2158,7 +2144,7 @@ main_bot.on('callback_query', async ctx => {
             const dealData = states.pendingDeal[from];
 
             if (!dealData) {
-                await ctx.answerCbQuery('❌ Данные сделки не найдены', { show_alert: true });
+                await ctx.answerCbQuery(MESSAGES.ERROR_DEAL_NOT_FOUND, { show_alert: true });
                 return;
             }
 
@@ -2233,7 +2219,7 @@ main_bot.on('callback_query', async ctx => {
 
                         states.pendingDeal[from].messageId = message.message_id;
                         saveJson('states', states);
-                        await ctx.answerCbQuery('❌ Нет доступных вариантов оплаты', { show_alert: true });
+                        await ctx.answerCbQuery(MESSAGES.ERROR_PAYMENT_VARIANTS_NOT_FOUND, { show_alert: true });
                         return;
                     }
 
@@ -2267,7 +2253,10 @@ main_bot.on('callback_query', async ctx => {
                     return;
                 } catch (error) {
                     console.error(`Error processing payment variants:`, error.message);
-                    await ctx.answerCbQuery('❌ Ошибка при получении вариантов оплаты', { show_alert: true });
+                    const errorMessage = error.message.includes('Processing is not enabled') 
+                        ? '❌ Платёжная система недоступна. Обратитесь в поддержку.'
+                        : MESSAGES.ERROR_PAYMENT_VARIANTS_FETCH_FAILED;
+                    await ctx.answerCbQuery(errorMessage, { show_alert: true });
                     return;
                 }
             }
@@ -2342,7 +2331,7 @@ main_bot.on('callback_query', async ctx => {
 
                     states.pendingDeal[from].messageId = message.message_id;
                     saveJson('states', states);
-                    await ctx.answerCbQuery('❌ Нет доступных вариантов оплаты', { show_alert: true });
+                    await ctx.answerCbQuery(MESSAGES.ERROR_PAYMENT_VARIANTS_NOT_FOUND, { show_alert: true });
                     return;
                 }
 
@@ -2376,7 +2365,10 @@ main_bot.on('callback_query', async ctx => {
                 return;
             } catch (error) {
                 console.error(`Error processing payment variants:`, error.message);
-                await ctx.answerCbQuery('❌ Ошибка при получении вариантов оплаты', { show_alert: true });
+                const errorMessage = error.message.includes('Processing is not enabled') 
+                    ? '❌ Платёжная система недоступна. Обратитесь в поддержку.'
+                    : MESSAGES.ERROR_PAYMENT_VARIANTS_FETCH_FAILED;
+                await ctx.answerCbQuery(errorMessage, { show_alert: true });
                 return;
             }
         }
@@ -2409,7 +2401,7 @@ main_bot.on('callback_query', async ctx => {
             }
             
             if (!deal) {
-                await ctx.answerCbQuery('❌ Заявка не найдена', { show_alert: true });
+                await ctx.answerCbQuery(MESSAGES.ERROR_DEAL_NOT_FOUND, { show_alert: true });
                 return;
             }
             
@@ -2482,7 +2474,7 @@ main_bot.on('callback_query', async ctx => {
             const [dealId, paymentVariant] = data.split('_').slice(1);
             const dealIndex = deals.findIndex(d => d.id === dealId && d.status === 'draft');
             if (dealIndex === -1) {
-                await ctx.answerCbQuery('❌ Заявка не найдена или уже обработана', { show_alert: true });
+                await ctx.answerCbQuery(MESSAGES.ERROR_DEAL_NOT_FOUND_OR_PROCESSED, { show_alert: true });
                 return;
             }
 
@@ -2519,8 +2511,9 @@ main_bot.on('callback_query', async ctx => {
                         const deadlineMinutes = Math.ceil((expiresAt - now) / (60 * 1000));
                         const formattedDeadline = formatDate(expiresAt, true);
 
-                        paymentDetailsText += `\n\nРеквизиты BitCheck:\n<code>Оплату переводите строго по реквизитам ниже ⚠️ Время на оплату — ${deadlineMinutes} минут (крайнее время - ${formattedDeadline}) ⏱️ Затем пришлите заявку и чек оператору ⚠️\nКарта: ${selectedPaymentDetails.requisites.requisites}\nФИО: ${selectedPaymentDetails.requisites.holder}</code>`;
+                        paymentDetailsText += `\n\nРеквизиты BitCheck:\n<code>Оплату переводите строго по реквизитам ниже ⚠️ Время на оплату — ${deadlineMinutes} минут (крайнее время - ${formattedDeadline}) ⏱️ Затем пришлите заявку и чек оператору ⚠️\nКарта: ${selectedPaymentDetails.requisites.requisites}\nФИО: ${selectedPaymentDetails.requisites.holder}</code>\n\nP.S. Перевести можно из любого банка - главное, правильно указать номер карты получателя`;
                     } catch (error) {
+                        console.error(`Error starting merchant deal for deal ${deal.id}:`, error.message);
                         paymentDetailsText += `\n\nРеквизиты BitCheck:\n<code>‼️ Ошибка. Для вашей суммы в данный момент нет подходящих реквизитов</code>`;
                         selectedPaymentDetails = null;
                     }
@@ -2630,7 +2623,7 @@ main_bot.on('callback_query', async ctx => {
             const dealId = data.split('_')[2];
             const dealIndex = deals.findIndex(d => d.id === dealId && d.status === 'unpaid');
             if (dealIndex === -1) {
-                await ctx.answerCbQuery('❌ Заявка не найдена или уже обработана', { show_alert: true });
+                await ctx.answerCbQuery(MESSAGES.ERROR_DEAL_NOT_FOUND_OR_PROCESSED, { show_alert: true });
                 return;
             }
             const deal = deals[dealIndex];
@@ -2647,13 +2640,17 @@ main_bot.on('callback_query', async ctx => {
                     const invoiceId = deal.selectedPaymentDetailsId || deal.paymentDetailsId || states.pendingDeal[deal.userId]?.paymentDetailsId;
                     
                     if (!invoiceId) {
-                        throw new Error('invoiceId not found');
+                        console.error(`Error processing payment for deal ${deal.id}: invoiceId not found`);
+                        await ctx.answerCbQuery(MESSAGES.ERROR_PAYMENT_INVOICE_ID_NOT_FOUND, { show_alert: true });
+                        return;
                     }
                     
                     const invoice = await getMerchantInvoice(invoiceId);
                     
                     if (!invoice.deals || invoice.deals.length === 0) {
-                        throw new Error('No deals found in invoice');
+                        console.error(`Error processing payment for deal ${deal.id}: No deals found in invoice`);
+                        await ctx.answerCbQuery(MESSAGES.ERROR_PAYMENT_INVOICE_DATA_NOT_FOUND, { show_alert: true });
+                        return;
                     }
                     
                     const selectedPaymentDetails = invoice.deals[0];
@@ -2663,7 +2660,7 @@ main_bot.on('callback_query', async ctx => {
                     paymentDetailsText = `${paymentTarget}: <code>${deal.walletAddress}</code>`;
                     
                     if (selectedPaymentDetails.requisites) {
-                        paymentDetailsText += `\n\nРеквизиты BitCheck:\n<code>Карта: ${selectedPaymentDetails.requisites.requisites}\nФИО: ${selectedPaymentDetails.requisites.holder}</code>`;
+                        paymentDetailsText += `\n\nРеквизиты BitCheck:\n<code>Карта: ${selectedPaymentDetails.requisites.requisites}\nФИО: ${selectedPaymentDetails.requisites.holder}</code>\n\nP.S. Перевести можно из любого банка - главное, правильно указать номер карты получателя`;
                     }
                     
                     const dealStatusFromAPI = selectedPaymentDetails.status;
@@ -2711,7 +2708,10 @@ main_bot.on('callback_query', async ctx => {
                     }
                 } catch (error) {
                     console.error(`Error processing payment for deal ${deal.id}:`, error.message);
-                    await ctx.answerCbQuery('❌ Ошибка при обработке оплаты', { show_alert: true });
+                    const errorMessage = error.message.includes('Processing is not enabled') 
+                        ? '❌ Платёжная система недоступна. Обратитесь в поддержку.'
+                        : MESSAGES.ERROR_PAYMENT_PROCESSING_FAILED;
+                    await ctx.answerCbQuery(errorMessage, { show_alert: true });
                     return;
                 }
             } else {
@@ -2812,7 +2812,7 @@ main_bot.on('callback_query', async ctx => {
             const dealId = data.split('_')[3];
             const dealIndex = deals.findIndex(d => d.id === dealId && d.status === 'pending');
             if (dealIndex === -1) {
-                await ctx.answerCbQuery('❌ Заявка не найдена или уже обработана', { show_alert: true });
+                await ctx.answerCbQuery(MESSAGES.ERROR_DEAL_NOT_FOUND_OR_PROCESSED, { show_alert: true });
                 return;
             }
             const deal = deals[dealIndex];
@@ -2830,7 +2830,17 @@ main_bot.on('callback_query', async ctx => {
         if (data.startsWith('cancel_deal_')) {
             const states = loadStates();
             const dealId = data.split('_')[2];
-            const dealIndex = deals.findIndex(d => d.id === dealId && (d.status !== 'completed'));
+            const dealIndex = deals.findIndex(d => d.id === dealId && d.status !== 'completed' && d.status !== 'expired');
+            
+            if (dealIndex === -1) {
+                const deal = deals.find(d => d.id === dealId);
+                if (deal && (deal.status === 'completed' || deal.status === 'expired')) {
+                    await ctx.answerCbQuery(MESSAGES.ERROR_DEAL_CANNOT_CANCEL, { show_alert: true });
+                    return;
+                }
+                await ctx.answerCbQuery(MESSAGES.ERROR_DEAL_NOT_FOUND, { show_alert: true });
+                return;
+            }
 
             if (dealIndex !== -1) {
                 const deal = deals[dealIndex];
@@ -2846,6 +2856,9 @@ main_bot.on('callback_query', async ctx => {
                         await cancelInvoice(cancelId);
                     } catch (error) {
                         console.error(`Error canceling invoice for deal ${dealId}:`, error.message);
+                        if (error.message.includes('Processing is not enabled')) {
+                            console.error(`Processing is not enabled, skipping invoice cancellation for deal ${dealId}`);
+                        }
                     }
                 }
 
@@ -2873,7 +2886,7 @@ main_bot.on('callback_query', async ctx => {
                 const dealIndex = deals.findIndex(d => d.id === dealId);
 
                 if (dealIndex === -1) {
-                    await ctx.answerCbQuery('❌ Сделка не найдена или уже обработана', { show_alert: true });
+                    await ctx.answerCbQuery(MESSAGES.ERROR_DEAL_NOT_FOUND_OR_PROCESSED, { show_alert: true });
                     return;
                 }
 
@@ -2894,7 +2907,7 @@ main_bot.on('callback_query', async ctx => {
                 await ctx.answerCbQuery('✅ Сделка удалена', { show_alert: false });
             } catch (error) {
                 console.error('Error deleting deal:', error.message);
-                await ctx.answerCbQuery('❌ Ошибка при удалении сделки', { show_alert: true });
+                await ctx.answerCbQuery(MESSAGES.ERROR_DEAL_DELETE_FAILED, { show_alert: true });
             }
             return;
         }
@@ -2906,7 +2919,7 @@ main_bot.on('callback_query', async ctx => {
                 const dealIndex = deals.findIndex(d => d.id === dealId);
 
                 if (dealIndex === -1) {
-                    await ctx.answerCbQuery('❌ Сделка не найдена или уже обработана', { show_alert: true });
+                    await ctx.answerCbQuery(MESSAGES.ERROR_DEAL_NOT_FOUND_OR_PROCESSED, { show_alert: true });
                     return;
                 }
 
@@ -2978,7 +2991,7 @@ main_bot.on('callback_query', async ctx => {
                 await ctx.answerCbQuery('✅ Сделка завершена', { show_alert: false });
             } catch (error) {
                 console.error('Error completing deal:', error.message);
-                await ctx.answerCbQuery('❌ Ошибка при завершении сделки', { show_alert: true });
+                await ctx.answerCbQuery(MESSAGES.ERROR_DEAL_COMPLETE_FAILED, { show_alert: true });
             }
             return;
         }
@@ -2990,7 +3003,7 @@ main_bot.on('callback_query', async ctx => {
                 const withdrawalIndex = withdrawals.findIndex(w => w.id === withdrawalId);
 
                 if (withdrawalIndex === -1) {
-                    await ctx.answerCbQuery('❌ Заявка на вывод не найдена или уже обработана', { show_alert: true });
+                    await ctx.answerCbQuery(MESSAGES.ERROR_WITHDRAWAL_NOT_FOUND_OR_PROCESSED, { show_alert: true });
                     return;
                 }
 
@@ -3030,7 +3043,7 @@ main_bot.on('callback_query', async ctx => {
                 await ctx.answerCbQuery('✅ Вывод завершен', { show_alert: false });
             } catch (error) {
                 console.error('Error completing withdrawal:', error.message);
-                await ctx.answerCbQuery('❌ Ошибка при завершении вывода', { show_alert: true });
+                await ctx.answerCbQuery(MESSAGES.ERROR_WITHDRAWAL_COMPLETE_FAILED, { show_alert: true });
             }
             return;
         }
@@ -3071,7 +3084,7 @@ main_bot.on('callback_query', async ctx => {
         }
     } catch (error) {
         console.error('Error processing callback query:', error.message);
-        await ctx.answerCbQuery('❌ Ошибка обработки', { show_alert: true });
+        await ctx.answerCbQuery(MESSAGES.ERROR_CALLBACK_PROCESSING, { show_alert: true });
     }
 });
 

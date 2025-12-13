@@ -40,16 +40,23 @@ async function calculateDealTotals(dealData, priority, userId, deals = null) {
     
     if (isTenthDeal) {
         adjustedCommission = 0;
-        const rawTotal = dealData.type === 'sell' ? rubBefore - priorityPrice : rub + priorityPrice;
-        total = roundToNearest50(rawTotal);
+        if (dealData.type === 'sell') {
+            const rawTotal = rubBefore - priorityPrice;
+            total = roundToNearest50(rawTotal);
+        } else {
+            const rawTotal = rub + priorityPrice;
+            total = roundToNearest50(rawTotal);
+        }
     } else {
-        const rawTotal = dealData.type === 'sell'
-            ? rubBefore - baseCommission - priorityPrice
-            : rub + baseCommission + priorityPrice;
-        total = roundToNearest50(rawTotal);
-        adjustedCommission = dealData.type === 'sell'
-            ? Number((rubBefore - total - priorityPrice).toFixed(2))
-            : Number((total - rub - priorityPrice).toFixed(2));
+        if (dealData.type === 'sell') {
+            const rawTotal = rubBefore - baseCommission - priorityPrice;
+            total = Math.max(0, roundToNearest50(rawTotal));
+            adjustedCommission = Math.max(0, Number((rubBefore - total - priorityPrice).toFixed(2)));
+        } else {
+            const rawTotal = rub + baseCommission + priorityPrice;
+            total = roundToNearest50(rawTotal);
+            adjustedCommission = Math.max(0, Number((total - rub - priorityPrice).toFixed(2)));
+        }
     }
     
     return {
@@ -112,14 +119,10 @@ function calculateSellMinMaxAmounts(currency, config, priceBTC, priceLTC) {
 }
 
 module.exports = {
-    roundToNearest50,
-    calculatePriorityPrice,
-    checkIsTenthDeal,
     calculateDealTotals,
-    convertRubToCrypto,
-    convertCryptoToRub,
     calculateMinMaxAmounts,
     calculateSellMinMaxAmounts
 };
+
 
 

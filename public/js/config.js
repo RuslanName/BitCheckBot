@@ -123,6 +123,7 @@ function initializeConfig() {
                     await api.post('/bot/toggle', {enabled: newStatus});
                 } catch (err) {
                     console.error('Error updating bot status:', err);
+                    alert(err.response?.data?.error || 'Ошибка при обновлении статуса бота');
                     await updateBotStatus();
                 }
             });
@@ -136,6 +137,7 @@ function initializeConfig() {
                     await api.post('/processing/type', { type: newType });
                 } catch (err) {
                     console.error('Error updating processing type:', err);
+                    alert(err.response?.data?.error || 'Ошибка при обновлении типа процессинга');
                     await updateProcessingStatus();
                 }
             });
@@ -208,8 +210,10 @@ function initializeConfig() {
                 const password = document.getElementById('adminPassword').value;
                 try {
                     await api.put('/config/credentials', {login, password});
+                    alert('Логин и пароль успешно обновлены');
                 } catch (err) {
                     console.error('Error updating credentials:', err);
+                    alert(err.response?.data?.error || 'Ошибка при обновлении логина и пароля');
                 }
             });
         }
@@ -439,6 +443,7 @@ function initializeConfig() {
                     renderConfigTable();
                 } catch (err) {
                     console.error('Error saving array:', err);
+                    alert(err.response?.data?.error || 'Ошибка при сохранении данных');
                 }
             };
 
@@ -589,7 +594,10 @@ function initializeConfig() {
                     api.put('/config', updatedConfig).then(() => {
                         config = updatedConfig;
                         renderConfigTable();
-                    }).catch(err => console.error('Error updating config:', err.message));
+                    }).catch(err => {
+                        console.error('Error updating config:', err.message);
+                        alert(err.response?.data?.error || 'Ошибка при обновлении конфигурации');
+                    });
                 };
             });
         }

@@ -47,7 +47,7 @@ router.put('/config/credentials', authenticateToken, restrictTo('mainAdmin'), (r
         saveJson('config', cfg);
         res.json({ message: 'Login and password updated' });
     } else {
-        res.status(400).json({ error: 'Login and password are required' });
+        res.status(400).json({ error: 'Логин и пароль обязательны' });
     }
 });
 
@@ -76,7 +76,7 @@ function getProcessingType() {
 function setProcessingType(type) {
     const config = loadJson('config');
     if (!['none', 'ros_trust_processing', 'settlex_processing'].includes(type)) {
-        throw new Error('Invalid processing type');
+        throw new Error('Неверный тип процессинга');
     }
     config.processingType = type;
     config.processingStatus = type !== 'none';
@@ -104,12 +104,12 @@ router.post('/bot/toggle', authenticateToken, restrictTo('mainAdmin'), (req, res
     const { enabled } = req.body;
 
     if (typeof enabled !== 'boolean') {
-        return res.status(400).json({ error: 'Invalid enabled parameter' });
+        return res.status(400).json({ error: 'Неверный параметр enabled' });
     }
 
     if (getBotStatus() === enabled) {
-        const statusText = enabled ? 'enabled' : 'disabled';
-        return res.status(400).json({ error: `Bot is already ${statusText}` });
+        const statusText = enabled ? 'включен' : 'выключен';
+        return res.status(400).json({ error: `Бот уже ${statusText}` });
     }
 
     setBotStatus(enabled);
@@ -130,12 +130,12 @@ router.post('/processing/toggle', authenticateToken, restrictTo('mainAdmin'), (r
     const { enabled } = req.body;
 
     if (typeof enabled !== 'boolean') {
-        return res.status(400).json({ error: 'Invalid enabled parameter' });
+        return res.status(400).json({ error: 'Неверный параметр enabled' });
     }
 
     if (getProcessingStatus() === enabled) {
-        const statusText = enabled ? 'enabled' : 'disabled';
-        return res.status(400).json({ error: `Processing is already ${statusText}` });
+        const statusText = enabled ? 'включен' : 'выключен';
+        return res.status(400).json({ error: `Процессинг уже ${statusText}` });
     }
 
     setProcessingStatus(enabled);
@@ -150,7 +150,7 @@ router.post('/processing/type', authenticateToken, restrictTo('mainAdmin'), (req
     const { type } = req.body;
 
     if (!['none', 'ros_trust_processing', 'settlex_processing'].includes(type)) {
-        return res.status(400).json({ error: 'Invalid processing type. Must be: none, ros_trust_processing, or settlex_processing' });
+        return res.status(400).json({ error: 'Неверный тип процессинга. Должен быть: none, ros_trust_processing или settlex_processing' });
     }
 
     try {

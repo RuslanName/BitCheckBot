@@ -22,7 +22,7 @@ router.get('/raffles', authenticateToken, restrictTo('mainAdmin'), async (req, r
         res.json(data);
     } catch (err) {
         console.error('Error fetching raffles:', err.message);
-        res.status(500).json({ error: 'Internal Server Error' });
+        res.status(500).json({ error: 'Внутренняя ошибка сервера' });
     }
 });
 
@@ -49,7 +49,7 @@ router.post('/raffles', authenticateToken, restrictTo('mainAdmin'), (req, res) =
         res.status(201).json(item);
     } catch (err) {
         console.error('Error creating raffle:', err.message);
-        res.status(500).json({ error: 'Internal Server Error' });
+        res.status(500).json({ error: 'Внутренняя ошибка сервера' });
     }
 });
 
@@ -79,7 +79,7 @@ router.put('/raffles/:id', authenticateToken, restrictTo('mainAdmin'), (req, res
         res.json(list[idx]);
     } catch (err) {
         console.error('Error updating raffle:', err.message);
-        res.status(500).json({ error: 'Internal Server Error' });
+        res.status(500).json({ error: 'Внутренняя ошибка сервера' });
     }
 });
 
@@ -91,7 +91,7 @@ router.delete('/raffles/:id', authenticateToken, restrictTo('mainAdmin'), (req, 
         res.sendStatus(204);
     } catch (err) {
         console.error('Error deleting raffle:', err.message);
-        res.status(500).json({ error: 'Internal Server Error' });
+        res.status(500).json({ error: 'Внутренняя ошибка сервера' });
     }
 });
 

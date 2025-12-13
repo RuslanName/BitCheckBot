@@ -134,6 +134,8 @@ function initializeDeals() {
                 if (err.response?.status === 401 || err.response?.status === 403) {
                     localStorage.removeItem('token');
                     window.location.href = '/login';
+                } else {
+                    alert(err.response?.data?.error || 'Ошибка при завершении выбранных заявок');
                 }
             }
         };
@@ -151,6 +153,8 @@ function initializeDeals() {
                 if (err.response?.status === 401 || err.response?.status === 403) {
                     localStorage.removeItem('token');
                     window.location.href = '/login';
+                } else {
+                    alert(err.response?.data?.error || 'Ошибка при удалении выбранных заявок');
                 }
             }
         };
@@ -236,7 +240,7 @@ function initializeDeals() {
                     e.preventDefault();
                     if (deal.status === 'completed' || deal.status === 'expired') return;
 
-                    if (e.ctrlKey || e.shiftKey) {
+                    if ((e.ctrlKey || e.metaKey) || e.shiftKey) {
                         if (e.shiftKey && lastSelectedDealId) {
                             const currentIndex = Array.from(allRows).findIndex(row => row.dataset.id === dealId);
                             const lastIndex = Array.from(allRows).findIndex(row => row.dataset.id === lastSelectedDealId);
@@ -251,7 +255,7 @@ function initializeDeals() {
                                     allRows[i].classList.add('selected');
                                 }
                             }
-                        } else if (e.ctrlKey) {
+                        } else if (e.ctrlKey || e.metaKey) {
                             if (selectedDeals.has(dealId)) {
                                 selectedDeals.delete(dealId);
                                 tr.classList.remove('selected');
@@ -282,6 +286,7 @@ function initializeDeals() {
                             window.location.href = '/login';
                         } else {
                             console.error('Error deleting deal:', err);
+                            alert(err.response?.data?.error || 'Ошибка при удалении заявки');
                         }
                     });
                 };
@@ -299,6 +304,7 @@ function initializeDeals() {
                             window.location.href = '/login';
                         } else {
                             console.error('Error completing deal:', err);
+                            alert(err.response?.data?.error || 'Ошибка при завершении заявки');
                         }
                     });
                 };

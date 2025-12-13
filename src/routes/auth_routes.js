@@ -15,7 +15,7 @@ router.post('/login', (req, res) => {
             const token = jwt.sign({ login, role: 'mainAdmin' }, JWT_SECRET, { expiresIn: '1h' });
             return res.json({ token, role: 'mainAdmin' });
         } else {
-            return res.status(401).json({ error: 'In single operator mode, only the main administrator has access' });
+            return res.status(401).json({ error: 'В режиме одного оператора доступ есть только у главного администратора' });
         }
     }
 
@@ -39,7 +39,7 @@ router.post('/login', (req, res) => {
         return res.json({ token, role: 'admin', currency: operator.currency });
     }
 
-    res.status(401).json({ error: 'Invalid login or password' });
+    res.status(401).json({ error: 'Неверный логин или пароль' });
 });
 
 router.get('/user', authenticateToken, (req, res) => {
@@ -50,7 +50,7 @@ router.get('/user', authenticateToken, (req, res) => {
         });
     } catch (err) {
         console.error('Error fetching user data:', err.message);
-        res.status(500).json({ error: 'Internal Server Error' });
+        res.status(500).json({ error: 'Внутренняя ошибка сервера' });
     }
 });
 

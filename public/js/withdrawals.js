@@ -107,6 +107,8 @@ function initializeWithdrawals() {
                 if (err.response?.status === 401 || err.response?.status === 403) {
                     localStorage.removeItem('token');
                     window.location.href = '/login';
+                } else {
+                    alert(err.response?.data?.error || 'Ошибка при завершении выбранных выводов');
                 }
             }
         };
@@ -178,7 +180,7 @@ function initializeWithdrawals() {
                     const withdrawal = withdrawals.find(w => w.id === withdrawalId);
                     if (withdrawal.status === 'completed') return;
 
-                    if (e.ctrlKey || e.shiftKey) {
+                    if ((e.ctrlKey || e.metaKey) || e.shiftKey) {
                         if (e.shiftKey && lastSelectedWithdrawalId) {
                             const allRows = Array.from(document.querySelectorAll('tr[data-id]'));
                             const currentIndex = allRows.findIndex(row => row.dataset.id === withdrawalId);
@@ -194,7 +196,7 @@ function initializeWithdrawals() {
                                     allRows[i].classList.add('selected');
                                 }
                             }
-                        } else if (e.ctrlKey) {
+                        } else if (e.ctrlKey || e.metaKey) {
                             if (selectedWithdrawals.has(withdrawalId)) {
                                 selectedWithdrawals.delete(withdrawalId);
                                 tr.classList.remove('selected');
@@ -226,6 +228,7 @@ function initializeWithdrawals() {
                             window.location.href = '/login';
                         } else {
                             console.error('Error completing withdrawals:', err);
+                            alert(err.response?.data?.error || 'Ошибка при завершении вывода');
                         }
                     });
                 };

@@ -74,7 +74,7 @@ router.get('/deals', authenticateToken, async (req, res) => {
         });
     } catch (err) {
         console.error('Error fetching deals:', err.message);
-        res.status(500).json({ error: 'Internal Server Error' });
+        res.status(500).json({ error: 'Внутренняя ошибка сервера' });
     }
 });
 
@@ -86,7 +86,7 @@ router.patch('/deals/:id/complete', authenticateToken, async (req, res) => {
             return res.sendStatus(404);
         }
         if (req.user.role === 'admin' && deals[idx].currency !== req.user.currency) {
-            return res.status(403).json({ error: 'Invalid currency for your account' });
+            return res.status(403).json({ error: 'Неверная валюта для вашего аккаунта' });
         }
 
         deals[idx] = { ...deals[idx], status: 'completed' };
@@ -159,7 +159,7 @@ router.patch('/deals/:id/complete', authenticateToken, async (req, res) => {
         return res.json(deals[idx]);
     } catch (error) {
         console.error('Error completing deal:', error.message);
-        res.status(500).json({ error: 'Internal Server Error' });
+        res.status(500).json({ error: 'Внутренняя ошибка сервера' });
     }
 });
 
@@ -171,14 +171,34 @@ router.delete('/deals/:id', authenticateToken, (req, res) => {
             return res.sendStatus(404);
         }
         if (req.user.role === 'admin' && deal.currency !== req.user.currency) {
-            return res.status(403).json({ error: 'Invalid currency for your account' });
+            return res.status(403).json({ error: 'Неверная валюта для вашего аккаунта' });
         }
         deals = deals.filter(d => d.id !== req.params.id);
         saveJson('deals', deals);
         res.sendStatus(204);
     } catch (err) {
         console.error('Error deleting deal:', err.message);
-        res.status(500).json({ error: 'Internal Server Error' });
+        res.status(500).json({ error: 'Внутренняя ошибка сервера' });
+    }
+});
+
+router.get('/deals/analytics', authenticateToken, async (req, res) => {
+    try {
+        let data = loadJson('deals');
+        if (!Array.isArray(data)) {
+            data = Object.values(data);
+        }
+
+        let filtered = data.filter(d => d && d.status !== 'draft');
+
+        if (req.user.role === 'admin') {
+            filtered = filtered.filter(d => d.currency === req.user.currency);
+        }
+
+        res.json(filtered);
+    } catch (err) {
+        console.error('Error fetching deals for analytics:', err.message);
+        res.status(500).json({ error: 'Внутренняя ошибка сервера' });
     }
 });
 

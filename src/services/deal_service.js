@@ -2,15 +2,12 @@ const cron = require('node-cron');
 const { loadJson, saveJson } = require('../utils/storage_utils');
 const { loadStates } = require('../utils/state_utils');
 const { getProcessing, isProcessingEnabled } = require('../integrations');
-const { getOperatorContactUrl } = require('./user_service');
+const { getOperatorContactUrl, getOperators, isValidChat } = require('./user_service');
 const { getCommissionDiscount } = require('./commission_service');
 const { sendBitCheckPhoto } = require('../utils/telegram_utils');
+const { buildOperatorDealMessage, buildOperatorDealReplyMarkup, buildPaymentSystemText } = require('./message_service');
 
 const cronTasks = new Map();
-
-function setCronTasks(cronTasksMap) {
-    Object.assign(cronTasks, cronTasksMap);
-}
 
 async function checkUnpaidDeals() {
     try {
@@ -33,8 +30,7 @@ async function checkUnpaidDeals() {
             if (!deal.selectedPaymentDetailsId) {
                 const dealTime = new Date(deal.timestamp);
                 if (now - dealTime > paymentTimeout) {
-                    deals.splice(i, 1);
-                    continue;
+                    isExpired = true;
                 }
             } else if (deal.processingStatus) {
                 try {
@@ -120,37 +116,79 @@ async function checkInvoiceStatus(dealId, userId, invoiceId, merchantApiKey, max
             const invoice = await processing.getInvoice(invoiceId);
             const dealStatus = invoice.deals && invoice.deals.length > 0 ? invoice.deals[0].status : null;
             if (dealStatus === 'completed') {
-                deals[dealIndex].status = 'completed';
-                saveJson('deals', deals);
-
+                const deal = deals[dealIndex];
                 const config = loadJson('config');
-                const operatorContactUrl = getOperatorContactUrl(deals[dealIndex].currency);
-                const priorityPrice = deals[dealIndex].priority === 'elevated' ? config.priorityPriceRub : 0;
-                const discount = await getCommissionDiscount(userId);
+                const users = loadJson('users') || [];
+                const user = users.find(u => u.id === userId);
+                
+                if (!user) {
+                    cronTasks.delete(`check_invoice_${dealId}`);
+                    checkTask.stop();
+                    return;
+                }
 
-                const caption = `✅ Сделка №${dealId} завершена!\n` +
-                    `Покупка ${deals[dealIndex].currency}\n` +
-                    `Количество: ${deals[dealIndex].cryptoAmount} ${deals[dealIndex].currency}\n` +
-                    `Сумма: ${deals[dealIndex].rubAmount} RUB\n` +
-                    `Комиссия: ${deals[dealIndex].commission} RUB (скидка ${discount.toFixed(2)}%)\n` +
-                    `Приоритет: ${deals[dealIndex].priority === 'elevated' ? `Повышенный (+${priorityPrice} RUB)` : 'Обычный'}\n` +
-                    `Итог: ${deals[dealIndex].total} RUB\n` +
-                    `Кошелёк: ${deals[dealIndex].walletAddress}`;
+                const operators = getOperators(deal.currency);
+                let operatorNotified = false;
+                
+                for (const operator of operators) {
+                    try {
+                        const operatorId = users.find(u => u.username === operator.username)?.id;
+                        if (operatorId && await isValidChat(operatorId)) {
+                            const operatorCaption = `✅ Оплата подтверждена API!\n\n` +
+                                `🆕 Заявка на сделку № ${deal.id}\n` +
+                                `@${user.username || 'Нет'} (ID ${user.id})\n` +
+                                `Покупка ${deal.currency}\n` +
+                                `Количество: ${deal.cryptoAmount} ${deal.currency}\n` +
+                                `Сумма: ${deal.rubAmount} RUB\n` +
+                                `Комиссия: ${deal.commission} RUB\n` +
+                                `Приоритет: ${deal.priority === 'elevated' ? 'Повышенный' : 'Обычный'}\n` +
+                                `Итог: ${deal.total} RUB\n` +
+                                `Кошелёк: ${deal.walletAddress}\n\n` +
+                                `💳 Оплата подтверждена платежной системой. Требуется завершение сделки.`;
 
-                try {
-                    const message = await sendBitCheckPhoto(userId, {
-                        caption,
-                        reply_markup: {
-                            inline_keyboard: [
-                                [{ text: '📞 Написать оператору', url: operatorContactUrl }]
-                            ]
-                        },
-                        parse_mode: 'HTML'
-                    });
-                    states.pendingDeal[userId] = { messageId: message.message_id };
-                    saveJson('states', states);
-                } catch (error) {
-                    console.error(`Error sending completion notification to user ${userId}:`, error.message);
+                            const operatorReplyMarkup = buildOperatorDealReplyMarkup(deal, user);
+                            await sendBitCheckPhoto(operatorId, {
+                                caption: operatorCaption,
+                                reply_markup: operatorReplyMarkup,
+                                parse_mode: 'HTML'
+                            });
+                            operatorNotified = true;
+                        }
+                    } catch (error) {
+                        console.error(`Error sending notification to operator ${operator.username}:`, error.message);
+                    }
+                }
+
+                if (operatorNotified) {
+                    const operatorContactUrl = getOperatorContactUrl(deal.currency);
+                    const priorityPrice = deal.priority === 'elevated' ? config.priorityPriceRub : 0;
+                    const discount = await getCommissionDiscount(userId);
+
+                    const caption = `✅ Оплата по заявке № ${deal.id} подтверждена платежной системой!\n` +
+                        `Покупка ${deal.currency}\n` +
+                        `Количество: ${deal.cryptoAmount} ${deal.currency}\n` +
+                        `Сумма: ${deal.rubAmount} RUB\n` +
+                        `Комиссия: ${deal.commission} RUB (скидка ${discount.toFixed(2)}%)\n` +
+                        `Приоритет: ${deal.priority === 'elevated' ? `Повышенный (+${priorityPrice} RUB)` : 'Обычный'}\n` +
+                        `Итог: ${deal.total} RUB\n` +
+                        `Кошелёк: ${deal.walletAddress}\n\n` +
+                        `⏳ Ожидайте завершения сделки оператором.`;
+
+                    try {
+                        const message = await sendBitCheckPhoto(userId, {
+                            caption,
+                            reply_markup: {
+                                inline_keyboard: [
+                                    [{ text: '📞 Написать оператору', url: operatorContactUrl }]
+                                ]
+                            },
+                            parse_mode: 'HTML'
+                        });
+                        states.pendingDeal[userId] = { messageId: message.message_id };
+                        saveJson('states', states);
+                    } catch (error) {
+                        console.error(`Error sending notification to user ${userId}:`, error.message);
+                    }
                 }
 
                 cronTasks.delete(`check_invoice_${dealId}`);
@@ -205,7 +243,6 @@ async function checkInvoiceStatus(dealId, userId, invoiceId, merchantApiKey, max
 
 module.exports = {
     checkUnpaidDeals,
-    checkInvoiceStatus,
-    setCronTasks
+    checkInvoiceStatus
 };
 
