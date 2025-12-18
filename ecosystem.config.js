@@ -7,7 +7,7 @@ module.exports = {
       exec_mode: 'fork',
       watch: false,
       restart_delay: 1000,
-      max_memory_restart: '250M',
+      max_memory_restart: '500M',
       out_file: './logs/main_bot.log',
       error_file: './logs/main_bot_error.log',
       log_date_format: 'YYYY-MM-DD HH:mm:ss',

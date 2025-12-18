@@ -6,6 +6,7 @@ const { getOperatorContactUrl, getOperators, isValidChat } = require('./user_ser
 const { getCommissionDiscount } = require('./commission_service');
 const { sendBitCheckPhoto } = require('../utils/telegram_utils');
 const { buildOperatorDealMessage, buildOperatorDealReplyMarkup, buildPaymentSystemText } = require('./message_service');
+const { shouldLogSendError } = require('../utils');
 
 const cronTasks = new Map();
 
@@ -85,7 +86,9 @@ async function checkUnpaidDeals() {
                     states.pendingDeal[deal.userId] = { messageId: message.message_id };
                     saveJson('states', states);
                 } catch (error) {
-                    console.error(`Error sending notification to user ${deal.userId}:`, error.message);
+                    if (shouldLogSendError(error)) {
+                        console.error(`Error sending notification to user ${deal.userId}:`, error.message);
+                    }
                 }
             }
         }
@@ -187,7 +190,9 @@ async function checkInvoiceStatus(dealId, userId, invoiceId, merchantApiKey, max
                         states.pendingDeal[userId] = { messageId: message.message_id };
                         saveJson('states', states);
                     } catch (error) {
-                        console.error(`Error sending notification to user ${userId}:`, error.message);
+                        if (shouldLogSendError(error)) {
+                            console.error(`Error sending notification to user ${userId}:`, error.message);
+                        }
                     }
                 }
 
@@ -217,7 +222,9 @@ async function checkInvoiceStatus(dealId, userId, invoiceId, merchantApiKey, max
                     states.pendingDeal[userId] = { messageId: message.message_id };
                     saveJson('states', states);
                 } catch (error) {
-                    console.error(`Error sending expiration notification to user ${userId}:`, error.message);
+                    if (shouldLogSendError(error)) {
+                        console.error(`Error sending expiration notification to user ${userId}:`, error.message);
+                    }
                 }
 
                 cronTasks.delete(`check_invoice_${dealId}`);

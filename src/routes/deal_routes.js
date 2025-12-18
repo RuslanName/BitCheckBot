@@ -6,6 +6,7 @@ const fs = require('fs-extra');
 const { loadJson, saveJson } = require('../utils/storage_utils');
 const { authenticateToken } = require('../middleware/auth_middleware');
 const { TELEGRAM_API, DATA_PATH } = require('../config/constants');
+const { shouldLogSendError } = require('../utils');
 
 const router = express.Router();
 
@@ -121,7 +122,9 @@ router.patch('/deals/:id/complete', authenticateToken, async (req, res) => {
                 timeout: 5000
             });
         } catch (error) {
-            console.error(`Error sending notification to user ${userId}:`, error.message);
+            if (shouldLogSendError(error)) {
+                console.error(`Error sending notification to user ${userId}:`, error.message);
+            }
         }
 
         const referrer = users.find(u => u.referrals && u.referrals.includes(deal.userId));
@@ -152,7 +155,9 @@ router.patch('/deals/:id/complete', authenticateToken, async (req, res) => {
                     timeout: 5000
                 });
             } catch (error) {
-                console.error(`Error sending notification to referrer ${referrer.id}:`, error.message);
+                if (shouldLogSendError(error)) {
+                    console.error(`Error sending notification to referrer ${referrer.id}:`, error.message);
+                }
             }
         }
 

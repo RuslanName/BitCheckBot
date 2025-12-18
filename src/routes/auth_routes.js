@@ -7,7 +7,11 @@ const { authenticateToken } = require('../middleware/auth_middleware');
 const router = express.Router();
 
 router.post('/login', (req, res) => {
-    const { login, password } = req.body;
+    const { login, password } = req.body || {};
+
+    if (!login || !password) {
+        return res.status(400).json({ error: 'Логин и пароль обязательны' });
+    }
     const config = loadJson('config');
 
     if (config.multipleOperatorsMode === false) {

@@ -51,7 +51,8 @@ const {
     clearPendingStates,
     sendBitCheckPhoto,
     setMainBotInstance,
-    generateCaptcha
+    generateCaptcha,
+    shouldLogSendError
 } = require('./src/utils');
 const { getProcessing, isProcessingEnabled } = require('./src/integrations');
 
@@ -290,6 +291,9 @@ function reloadTasks() {
 
 broadcastEmitter.on('newBroadcast', async () => {
     const broadcasts = loadJson('broadcasts') || [];
+    if (broadcasts.length === 0) {
+        return;
+    }
     const latestBroadcast = broadcasts[broadcasts.length - 1];
     if (latestBroadcast) {
         console.log(`New broadcast ${latestBroadcast.id} detected, scheduling tasks`);
@@ -311,6 +315,9 @@ fs.watch(path.join(DATA_PATH, 'database', 'broadcasts.json'), (eventType, filena
 
 raffleEmitter.on('newRaffle', async () => {
     const raffles = loadJson('raffles') || [];
+    if (raffles.length === 0) {
+        return;
+    }
     const latestRaffle = raffles[raffles.length - 1];
     if (latestRaffle) {
         console.log(`New raffle ${latestRaffle.id} detected, scheduling tasks`);
@@ -400,7 +407,9 @@ async function sendBroadcast(broadcast) {
                 }
             }
         } catch (error) {
-            console.error(`Error sending broadcast ${broadcast.id} to user ${user.id}:`, error.message);
+            if (shouldLogSendError(error)) {
+                console.error(`Error sending broadcast ${broadcast.id} to user ${user.id}:`, error.message);
+            }
             success = false;
         }
         callback();
@@ -485,7 +494,9 @@ async function sendRaffleNotification(raffle) {
         try {
             await sendBitCheckPhoto(user.id, { caption });
         } catch (error) {
-            console.error(`Error sending raffle notification to user ${user.id}:`, error.message);
+            if (shouldLogSendError(error)) {
+                console.error(`Error sending raffle notification to user ${user.id}:`, error.message);
+            }
         }
         callback();
     }, 1);
@@ -561,7 +572,9 @@ async function processRaffleEnd(raffle) {
                 }
             });
         } catch (error) {
-            console.error(`Error sending raffle results to user ${user.id}:`, error.message);
+            if (shouldLogSendError(error)) {
+                console.error(`Error sending raffle results to user ${user.id}:`, error.message);
+            }
         }
         callback();
     }, 1);
@@ -661,13 +674,19 @@ main_bot.command('start', async ctx => {
     const users = loadJson('users');
     const states = loadStates('states');
     const userId = ctx.from.id;
+    if (!ctx.message || !ctx.message.text) {
+        return;
+    }
     const args = ctx.message.text.split(' ');
     let invitedBy = null;
 
     if (args.length > 1 && args[1].startsWith('ref_')) {
-        const referralId = args[1].split('_')[1];
-        const referrer = users.find(u => u.referralId === referralId);
-        if (referrer && referrer.id !== userId) invitedBy = referrer.id;
+        const refParts = args[1].split('_');
+        const referralId = refParts.length > 1 ? refParts[1] : null;
+        if (referralId) {
+            const referrer = users.find(u => u.referralId === referralId);
+            if (referrer && referrer.id !== userId) invitedBy = referrer.id;
+        }
     }
 
     let user = users.find(u => u.id === userId);
@@ -685,7 +704,7 @@ main_bot.command('start', async ctx => {
     } else {
         const priceBTC = await getBtcRubPrice();
         const stats = calculateUserStats(userId);
-        const earningsRub = user.balance * priceBTC;
+        const earningsRub = (user.balance || 0) * priceBTC;
         const username = user.username ? `@${user.username}` : 'Нет';
         const referralLink = `https://t.me/${ctx.botInfo.username}?start=ref_${user.referralId}`;
         const profileText = `👤 Твой профиль в BitCheck\n` +
@@ -721,6 +740,10 @@ main_bot.hears('👤 Профиль', async ctx => {
     const users = loadJson('users');
     const userId = ctx.from.id;
     const user = users.find(u => u.id === userId);
+    if (!user) {
+        await sendBitCheckPhoto(ctx.chat.id, { caption: MESSAGES.ERROR_NOT_REGISTERED });
+        return;
+    }
     const priceBTC = await getBtcRubPrice();
     const stats = calculateUserStats(userId);
     const referralLink = `https://t.me/${ctx.botInfo.username}?start=ref_${user.referralId}`;
@@ -752,9 +775,13 @@ main_bot.hears('🤝 Партнёрство', async ctx => {
     const states = loadJson('states');
     const userId = ctx.from.id;
     const user = users.find(u => u.id === userId);
+    if (!user) {
+        await sendBitCheckPhoto(ctx.chat.id, { caption: MESSAGES.ERROR_NOT_REGISTERED });
+        return;
+    }
     const referralLink = `https://t.me/${ctx.botInfo.username}?start=ref_${user.referralId}`;
     const priceBTC = await getBtcRubPrice();
-    const earningsRub = user.balance * priceBTC;
+    const earningsRub = (user.balance || 0) * priceBTC;
     const text = buildReferralMessage(referralLink, (user.referrals || []).length, earningsRub, user.balance || 0);
     const replyMarkup = buildReferralReplyMarkup(referralLink);
 
@@ -830,14 +857,15 @@ main_bot.hears('🆘 Поддержка', async ctx => {
 });
 
 main_bot.on('message', async ctx => {
-    const config = loadJson('config');
-    const users = loadJson('users');
-    const states = loadStates();
-    const id = ctx.from.id;
-    const user = users.find(u => u.id === id);
-    if (user && user.isBlocked) return;
+    try {
+        const config = loadJson('config');
+        const users = loadJson('users');
+        const states = loadStates();
+        const id = ctx.from.id;
+        const user = users.find(u => u.id === id);
+        if (user && user.isBlocked) return;
 
-    if (states.pendingCaptcha[id] && ctx.message.text) {
+    if (states.pendingCaptcha[id] && ctx.message && ctx.message.text) {
         const captchaData = states.pendingCaptcha[id];
         const userInput = ctx.message.text.trim().toUpperCase();
         const correctCaptcha = captchaData.correct.toUpperCase();
@@ -860,7 +888,9 @@ main_bot.on('message', async ctx => {
                         try {
                             await sendBitCheckPhoto(referrer.id, { caption: `👥 ${ctx.from.first_name || 'Пользователь'} приглашён!` });
                         } catch (error) {
-                            console.error(`Error sending notification to referrer ${referrer.id}:`, error.message);
+                            if (shouldLogSendError(error)) {
+                                console.error(`Error sending notification to referrer ${referrer.id}:`, error.message);
+                            }
                         }
                     }
                 }
@@ -885,7 +915,7 @@ main_bot.on('message', async ctx => {
 
             const priceBTC = await getBtcRubPrice();
             const stats = calculateUserStats(id);
-            const earningsRub = user.balance * priceBTC;
+            const earningsRub = (user.balance || 0) * priceBTC;
             const username = user.username ? `@${user.username}` : 'Нет';
             const referralLink = `https://t.me/${ctx.botInfo.username}?start=ref_${user.referralId}`;
             const profileText = `👤 Твой профиль в BitCheck\n` +
@@ -931,8 +961,16 @@ main_bot.on('message', async ctx => {
     }
 
     if (users.find(u => u.id === id)) {
-        if (states.pendingUpdateProfile[id] && states.pendingUpdateProfile[id].type.startsWith('add_')) {
-            const type = states.pendingUpdateProfile[id].type.split('_')[1];
+        if (!ctx.message || !ctx.message.text) {
+            return;
+        }
+
+        if (states.pendingUpdateProfile[id] && states.pendingUpdateProfile[id].type && states.pendingUpdateProfile[id].type.startsWith('add_')) {
+            const typeParts = states.pendingUpdateProfile[id].type.split('_');
+            if (typeParts.length < 2) {
+                return;
+            }
+            const type = typeParts[1];
             const isSell = type === 'defaultRequisites';
             const wallet = ctx.message.text.trim();
 
@@ -950,6 +988,10 @@ main_bot.on('message', async ctx => {
                 return;
             }
 
+            if (!user) {
+                console.error(`User not found: ${id}`);
+                return;
+            }
             user[type] = user[type] || [];
             user[type].push(wallet);
             saveJson('users', users);
@@ -988,7 +1030,9 @@ main_bot.on('message', async ctx => {
                         });
                         await sendBitCheckPhoto(ctx.chat.id, { caption: MESSAGES.SUPPORT_REPLY_SENT(supportData.targetId) });
                     } catch (error) {
-                        console.error(`Error sending response to user ${supportData.targetId}:`, error.message);
+                        if (shouldLogSendError(error)) {
+                            console.error(`Error sending response to user ${supportData.targetId}:`, error.message);
+                        }
                         await sendBitCheckPhoto(ctx.chat.id, { caption: MESSAGES.ERROR_SUPPORT_SEND_FAILED(supportData.targetId) });
                     }
                 } else {
@@ -1072,8 +1116,16 @@ main_bot.on('message', async ctx => {
             }
         }
 
+        if (!ctx.message || !ctx.message.text) {
+            return;
+        }
+
         if (states.pendingDeal[id] && states.pendingDeal[id].newWallet) {
             const dealData = states.pendingDeal[id]
+            if (!dealData || !dealData.type || !dealData.currency) {
+                console.error(`Invalid dealData for user ${id}`);
+                return;
+            }
             const isBuy = dealData.type === 'buy'
             const walletType = isBuy ? `defaultWallets${dealData.currency}` : 'defaultRequisites'
             const wallet = ctx.message.text.trim()
@@ -1101,11 +1153,12 @@ main_bot.on('message', async ctx => {
             }
 
             const actionText = isBuy ? 'кошелёк' : 'реквизиты'
+            states.pendingDeal[id].pendingWallet = wallet
             const message = await sendBitCheckPhoto(ctx.chat.id, {
                 caption: `📝 Хотите ли добавить ${actionText} как постоянный?\n${wallet}`,
                 reply_markup: {
                     inline_keyboard: [
-                        [{ text: 'Нет', callback_data: `save_wallet_no_${wallet}` }, { text: 'Да', callback_data: `save_wallet_yes_${wallet}` }],
+                        [{ text: 'Нет', callback_data: 'save_wallet_no' }, { text: 'Да', callback_data: 'save_wallet_yes' }],
                         [{ text: '❌ Отменить', callback_data: 'cancel_action' }]
                     ]
                 }
@@ -1119,7 +1172,12 @@ main_bot.on('message', async ctx => {
 
         if (states.pendingDeal[id] && states.pendingDeal[id].amount && !states.pendingDeal[id].wallet) {
             const dealData = states.pendingDeal[id]
+            if (!dealData || !dealData.type || !dealData.currency) {
+                console.error(`Invalid dealData for user ${id}`);
+                return;
+            }
             const isBuy = dealData.type === 'buy'
+            const currency = dealData.currency
             const walletType = isBuy ? `defaultWallets${dealData.currency}` : 'defaultRequisites'
             const wallets = user[walletType] || []
 
@@ -1165,9 +1223,17 @@ main_bot.on('message', async ctx => {
         }
 
         if (states.pendingDeal[id]) {
+            if (!ctx.message || !ctx.message.text) {
+                return;
+            }
+
             let input = ctx.message.text.trim()
             let isCryptoInput = false, amount, rub, rubBefore
             const dealData = states.pendingDeal[id]
+            if (!dealData || !dealData.type || !dealData.currency) {
+                console.error(`Invalid dealData for user ${id}`);
+                return;
+            }
             const isBuy = dealData.type === 'buy'
             const currency = dealData.currency
             const price = currency === 'BTC' ? await getBtcRubPrice() : await getLtcRubPrice()
@@ -1277,6 +1343,10 @@ main_bot.on('message', async ctx => {
             return
         }
 
+        if (!ctx.message || !ctx.message.text) {
+            return
+        }
+
         if (states.pendingWithdrawal[id] && states.pendingWithdrawal[id].amount && !states.pendingWithdrawal[id].wallet) {
             const wallet = ctx.message.text.trim();
             if (!wallet || wallet.length < 10) {
@@ -1301,11 +1371,12 @@ main_bot.on('message', async ctx => {
                 console.error(`Error deleting message ${states.pendingWithdrawal[id].messageId}:`, error.message);
             }
 
+            states.pendingWithdrawal[id].pendingWallet = wallet;
             const message = await sendBitCheckPhoto(ctx.chat.id, {
                 caption: `📝 Хотите ли добавить кошелёк как постоянный?\n${wallet}`,
                 reply_markup: {
                     inline_keyboard: [
-                        [{ text: 'Нет', callback_data: `save_withdrawal_wallet_no_${wallet}` }, { text: 'Да', callback_data: `save_withdrawal_wallet_yes_${wallet}` }],
+                        [{ text: 'Нет', callback_data: 'save_withdrawal_wallet_no' }, { text: 'Да', callback_data: 'save_withdrawal_wallet_yes' }],
                         [{ text: '❌ Отменить', callback_data: 'cancel_action' }]
                     ]
                 }
@@ -1327,6 +1398,10 @@ main_bot.on('message', async ctx => {
         }
 
         if (states.pendingWithdrawal[id]) {
+            if (!ctx.message || !ctx.message.text) {
+                return;
+            }
+
             const input = ctx.message.text.trim();
             const priceBTC = await getBtcRubPrice();
             const inputValue = parseFloat(input);
@@ -1334,7 +1409,11 @@ main_bot.on('message', async ctx => {
 
             const users = loadJson('users');
             const user = users.find(u => u.id === id);
-            const earningsRub = user.balance * priceBTC;
+            if (!user) {
+                console.error(`User not found: ${id}`);
+                return;
+            }
+            const earningsRub = (user.balance || 0) * priceBTC;
             const config = loadJson('config');
             const minWithdrawRub = config.minWithdrawAmountRub;
 
@@ -1362,7 +1441,7 @@ main_bot.on('message', async ctx => {
                 amount = rubAmount / priceBTC;
             }
 
-            if (amount > user.balance || rubAmount < minWithdrawRub) {
+            if (!user || amount > (user.balance || 0) || rubAmount < minWithdrawRub) {
                 try {
                     await ctx.deleteMessage(states.pendingWithdrawal[id].messageId);
                 } catch (error) {
@@ -1375,7 +1454,7 @@ main_bot.on('message', async ctx => {
                     `Введено: ${rubAmount.toFixed(2)} RUB (~${amount.toFixed(8)} BTC)\n` +
                     `Не хватает: ${missingRub.toFixed(2)} RUB (~${(missingRub / priceBTC).toFixed(8)} BTC)`
                     : `❌ Введенная сумма превышает ваш баланс\n` +
-                    `Макс: ${earningsRub.toFixed(2)} RUB (~${user.balance.toFixed(8)} BTC)\n` +
+                    `Макс: ${earningsRub.toFixed(2)} RUB (~${(user.balance || 0).toFixed(8)} BTC)\n` +
                     `Введено: ${rubAmount.toFixed(2)} RUB (~${amount.toFixed(8)} BTC)`;
                 const message = await sendBitCheckPhoto(ctx.chat.id, {
                     caption,
@@ -1429,6 +1508,17 @@ main_bot.on('message', async ctx => {
             saveJson('states', states);
         }
     }
+    } catch (error) {
+        console.error('Error processing message:', error.message);
+        if (error.stack) {
+            console.error('Stack:', error.stack);
+        }
+        try {
+            await sendBitCheckPhoto(ctx.chat.id, { caption: MESSAGES.ERROR_GENERAL });
+        } catch (sendError) {
+            console.error('Error sending error message:', sendError.message);
+        }
+    }
 });
 
 main_bot.on('callback_query', async ctx => {
@@ -1445,7 +1535,12 @@ main_bot.on('callback_query', async ctx => {
         const withdrawals = loadJson('withdrawals');
 
         if (data.startsWith('view_raffle_results_')) {
-            const raffleId = data.split('_')[3];
+            const parts = data.split('_');
+            const raffleId = parts.length > 3 ? parts[3] : null;
+            if (!raffleId) {
+                await ctx.answerCbQuery(MESSAGES.ERROR_INVALID_DATA, { show_alert: true });
+                return;
+            }
             const raffles = loadJson('raffles') || [];
             const raffle = raffles.find(r => r.id === raffleId);
             if (!raffle) {
@@ -1461,7 +1556,9 @@ main_bot.on('callback_query', async ctx => {
                 });
                 await ctx.answerCbQuery('✅ Результаты отправлены', { show_alert: false });
             } catch (error) {
-                console.error(`Error sending raffle results file to user ${from}:`, error.message);
+                if (shouldLogSendError(error)) {
+                    console.error(`Error sending raffle results file to user ${from}:`, error.message);
+                }
                 await ctx.answerCbQuery(MESSAGES.ERROR_FILE_SEND_FAILED, { show_alert: true });
             }
             return;
@@ -1469,7 +1566,12 @@ main_bot.on('callback_query', async ctx => {
 
         if (data.startsWith('select_wallet_')) {
             const states = loadStates();
-            const index = parseInt(data.split('_')[2]);
+            const parts = data.split('_');
+            if (parts.length < 3) {
+                await ctx.answerCbQuery(MESSAGES.ERROR_INVALID_DATA, { show_alert: true });
+                return;
+            }
+            const index = parseInt(parts[2]);
 
             if (!states.pendingDeal[from] || states.pendingDeal[from].action !== 'select_wallet' || !states.pendingDeal[from].walletType) {
                 console.error(`Invalid or missing data for user ${from}`);
@@ -1480,6 +1582,11 @@ main_bot.on('callback_query', async ctx => {
             const walletType = states.pendingDeal[from].walletType;
             const users = loadJson('users');
             const user = users.find(u => u.id === from);
+            if (!user) {
+                console.error(`User not found: ${from}`);
+                await ctx.answerCbQuery(MESSAGES.ERROR_INVALID_DATA, { show_alert: true });
+                return;
+            }
             const wallet = user[walletType]?.[index];
 
             if (!wallet) {
@@ -1522,6 +1629,12 @@ main_bot.on('callback_query', async ctx => {
 
             const walletType = states.pendingDeal[from].walletType;
             const isSell = walletType === 'defaultRequisites';
+            
+            if (!states.pendingDeal[from].currency && !isSell) {
+                console.error(`Invalid or missing currency for user ${from}`);
+                await ctx.answerCbQuery(MESSAGES.ERROR_INVALID_DATA, { show_alert: true });
+                return;
+            }
 
             await ctx.deleteMessage(states.pendingDeal[from].messageId).catch(error => {
                 console.error(`Error deleting message ${states.pendingDeal[from].messageId}:`, error.message);
@@ -1542,17 +1655,17 @@ main_bot.on('callback_query', async ctx => {
             return;
         }
 
-        if (data.startsWith('save_wallet_')) {
-            const parts = data.split('_');
-            const isYes = parts[2] === 'yes';
-            const wallet = parts.slice(3).join('_');
+        if (data === 'save_wallet_yes' || data === 'save_wallet_no') {
             const states = loadStates();
+            const isYes = data === 'save_wallet_yes';
 
-            if (!states.pendingDeal[from] || !states.pendingDeal[from].walletType || states.pendingDeal[from].action !== 'save_wallet') {
+            if (!states.pendingDeal[from] || !states.pendingDeal[from].walletType || states.pendingDeal[from].action !== 'save_wallet' || !states.pendingDeal[from].pendingWallet) {
                 console.error(`Invalid or missing data for user ${from}`);
                 await ctx.answerCbQuery(MESSAGES.ERROR_INVALID_DATA, { show_alert: true });
                 return;
             }
+
+            const wallet = states.pendingDeal[from].pendingWallet;
 
             const walletType = states.pendingDeal[from].walletType;
             const isSell = walletType === 'defaultRequisites';
@@ -1560,6 +1673,11 @@ main_bot.on('callback_query', async ctx => {
             if (isYes) {
                 const users = loadJson('users');
                 const user = users.find(u => u.id === from);
+                if (!user) {
+                    console.error(`User not found: ${from}`);
+                    await ctx.answerCbQuery(MESSAGES.ERROR_INVALID_DATA, { show_alert: true });
+                    return;
+                }
                 user[walletType] = user[walletType] || [];
                 if (!user[walletType].includes(wallet)) {
                     user[walletType].push(wallet);
@@ -1611,6 +1729,11 @@ main_bot.on('callback_query', async ctx => {
             const states = loadStates();
             const users = loadJson('users');
             const user = users.find(u => u.id === from);
+            if (!user) {
+                console.error(`User not found: ${from}`);
+                await ctx.answerCbQuery(MESSAGES.ERROR_INVALID_DATA, { show_alert: true });
+                return;
+            }
             const type = data === 'update_buy_btc' ? 'defaultWalletsBTC' : data === 'update_buy_ltc' ? 'defaultWalletsLTC' : 'defaultRequisites';
             const isSell = data === 'update_sell';
             const wallets = user[type] || [];
@@ -1655,6 +1778,11 @@ main_bot.on('callback_query', async ctx => {
 
             const users = loadJson('users');
             const user = users.find(u => u.id === from);
+            if (!user) {
+                console.error(`User not found: ${from}`);
+                await ctx.answerCbQuery(MESSAGES.ERROR_INVALID_DATA, { show_alert: true });
+                return;
+            }
 
             const type = updateProfileData.walletType;
             const isSell = type === 'defaultRequisites';
@@ -1696,13 +1824,29 @@ main_bot.on('callback_query', async ctx => {
                 return;
             }
 
-            const index = parseInt(data.split('_')[2]);
+            const parts = data.split('_');
+            if (parts.length < 3) {
+                await ctx.answerCbQuery(MESSAGES.ERROR_INVALID_DATA, { show_alert: true });
+                return;
+            }
+            const index = parseInt(parts[2]);
 
             const users = loadJson('users');
             const user = users.find(u => u.id === from);
+            if (!user) {
+                console.error(`User not found: ${from}`);
+                await ctx.answerCbQuery(MESSAGES.ERROR_INVALID_DATA, { show_alert: true });
+                return;
+            }
 
             const type = updateProfileData.walletType;
             const isSell = type === 'defaultRequisites';
+
+            if (!user[type] || !Array.isArray(user[type]) || index < 0 || index >= user[type].length) {
+                console.error(`Invalid wallet index or type for user ${from}`);
+                await ctx.answerCbQuery(MESSAGES.ERROR_INVALID_DATA, { show_alert: true });
+                return;
+            }
 
             user[type].splice(index, 1);
             saveJson('users', users);
@@ -1722,7 +1866,12 @@ main_bot.on('callback_query', async ctx => {
 
         if (data.startsWith('add_detail_')) {
             const states = loadStates();
-            const type = data.split('_')[2];
+            const parts = data.split('_');
+            if (parts.length < 3) {
+                await ctx.answerCbQuery(MESSAGES.ERROR_INVALID_DATA, { show_alert: true });
+                return;
+            }
+            const type = parts[2];
             const isSell = type === 'defaultRequisites';
             states.pendingUpdateProfile[from] = { type: `add_${type}` };
 
@@ -1744,9 +1893,19 @@ main_bot.on('callback_query', async ctx => {
 
         if (data.startsWith('select_withdrawal_wallet_')) {
             const states = loadStates();
-            const index = parseInt(data.split('_')[3]);
+            const parts = data.split('_');
+            if (parts.length < 4) {
+                await ctx.answerCbQuery(MESSAGES.ERROR_INVALID_DATA, { show_alert: true });
+                return;
+            }
+            const index = parseInt(parts[3]);
             const users = loadJson('users');
             const user = users.find(u => u.id === from);
+            if (!user) {
+                console.error(`User not found: ${from}`);
+                await ctx.answerCbQuery(MESSAGES.ERROR_INVALID_DATA, { show_alert: true });
+                return;
+            }
             const wallet = user.defaultWalletsBTC?.[index];
 
             if (!wallet) {
@@ -1852,21 +2011,26 @@ main_bot.on('callback_query', async ctx => {
             return;
         }
 
-        if (data.startsWith('save_withdrawal_wallet_')) {
-            const parts = data.split('_');
-            const isYes = parts[2] === 'yes';
-            const wallet = parts.slice(3).join('_');
+        if (data === 'save_withdrawal_wallet_yes' || data === 'save_withdrawal_wallet_no') {
             const states = loadStates();
+            const isYes = data === 'save_withdrawal_wallet_yes';
             const withdrawData = states.pendingWithdrawal[from];
 
-            if (!withdrawData || withdrawData.action !== 'save_withdrawal_wallet' || !withdrawData.withdrawal) {
+            if (!withdrawData || withdrawData.action !== 'save_withdrawal_wallet' || !withdrawData.withdrawal || !withdrawData.pendingWallet) {
                 console.error(`Invalid or missing withdrawal data for user ${from}`);
                 await ctx.answerCbQuery(MESSAGES.ERROR_INVALID_DATA, { show_alert: true });
                 return;
             }
 
+            const wallet = withdrawData.pendingWallet;
+
             const users = loadJson('users');
             const user = users.find(u => u.id === from);
+            if (!user) {
+                console.error(`User not found: ${from}`);
+                await ctx.answerCbQuery(MESSAGES.ERROR_INVALID_DATA, { show_alert: true });
+                return;
+            }
 
             if (isYes) {
                 user.defaultWalletsBTC = user.defaultWalletsBTC || [];
@@ -1952,7 +2116,12 @@ main_bot.on('callback_query', async ctx => {
 
         if (data.startsWith('operator_reply_')) {
             const states = loadStates();
-            const targetId = parseInt(data.split('_')[2]);
+            const parts = data.split('_');
+            if (parts.length < 3) {
+                await ctx.answerCbQuery(MESSAGES.ERROR_INVALID_DATA, { show_alert: true });
+                return;
+            }
+            const targetId = parseInt(parts[2]);
             if (states.pendingOperatorMessages[targetId]) {
                 for (const { operatorId, messageId } of states.pendingOperatorMessages[targetId]) {
                     await main_bot.telegram.deleteMessage(operatorId, messageId).catch(error => {
@@ -2223,10 +2392,13 @@ main_bot.on('callback_query', async ctx => {
                         return;
                     }
 
-                    const paymentButtons = paymentVariants.map(variant => [{
-                        text: variant.method.charAt(0).toUpperCase() + variant.method.slice(1),
-                        callback_data: `select_payment_variant_${variant.method}_${variant.option || ''}_${deal.id}`
-                    }]);
+                    const paymentButtons = await Promise.all(paymentVariants.map(async variant => {
+                        const paymentMethodName = await getPaymentMethodName(variant.method);
+                        return [{
+                            text: paymentMethodName,
+                            callback_data: `select_payment_variant_${variant.method}_${variant.option || ''}_${deal.id}`
+                        }];
+                    }));
 
                     paymentButtons.push([{ text: '❌ Отменить', callback_data: `cancel_deal_${deal.id}` }]);
 
@@ -2335,10 +2507,13 @@ main_bot.on('callback_query', async ctx => {
                     return;
                 }
 
-                const paymentButtons = paymentVariants.map(variant => [{
-                    text: variant.method.charAt(0).toUpperCase() + variant.method.slice(1),
-                    callback_data: `select_payment_variant_${variant.method}_${variant.option || ''}_${deal.id}`
-                }]);
+                const paymentButtons = await Promise.all(paymentVariants.map(async variant => {
+                    const paymentMethodName = await getPaymentMethodName(variant.method);
+                    return [{
+                        text: paymentMethodName,
+                        callback_data: `select_payment_variant_${variant.method}_${variant.option || ''}_${deal.id}`
+                    }];
+                }));
 
                 paymentButtons.push([{ text: '❌ Отменить', callback_data: `cancel_deal_${deal.id}` }]);
 
@@ -2375,9 +2550,18 @@ main_bot.on('callback_query', async ctx => {
 
         if (data.startsWith('select_payment_variant_')) {
             const parts = data.split('_');
+            if (parts.length < 5) {
+                await ctx.answerCbQuery(MESSAGES.ERROR_INVALID_DATA, { show_alert: true });
+                return;
+            }
             const variantMethod = parts[3];
             const dealId = parts[parts.length - 1];
             const variantOption = parts.length >= 6 ? (parts[4] || '') : '';
+            
+            if (!dealId || !variantMethod) {
+                await ctx.answerCbQuery(MESSAGES.ERROR_INVALID_DATA, { show_alert: true });
+                return;
+            }
             
             const states = loadJson('states');
             const deals = loadJson('deals');
@@ -2417,10 +2601,8 @@ main_bot.on('callback_query', async ctx => {
             }
 
             const paymentMethodName = await getPaymentMethodName(variantMethod);
-            const paymentOptionName = variantOption && PAYMENT_OPTION_NAMES[variantOption] ? PAYMENT_OPTION_NAMES[variantOption] : '';
-            const paymentOptionText = paymentOptionName ? ` (${paymentOptionName})` : '';
 
-            const paymentSystemText = `Платёжная система: Карта - ${paymentMethodName || variantMethod}${paymentOptionText}\n`;
+            const paymentSystemText = `Платёжная система: Карта - ${paymentMethodName || variantMethod}\n`;
             const caption = buildDealConfirmationMessage(deal, discount, priorityPrice, paymentSystemText, paymentTarget);
             const replyMarkup = buildDealConfirmationReplyMarkup(deal.id, variantMethod);
             const message = await sendBitCheckPhoto(ctx.chat.id, {
@@ -2433,7 +2615,7 @@ main_bot.on('callback_query', async ctx => {
             states.pendingDeal[from].paymentVariant = variantMethod;
             states.pendingDeal[from].paymentOption = variantOption;
             saveJson('states', states);
-            await ctx.answerCbQuery(`✅ Выбран вариант оплаты: ${paymentMethodName || variantMethod}${paymentOptionText}`, { show_alert: false });
+            await ctx.answerCbQuery(`✅ Выбран вариант оплаты: ${paymentMethodName || variantMethod}`, { show_alert: false });
             return;
         }
 
@@ -2471,7 +2653,16 @@ main_bot.on('callback_query', async ctx => {
 
         if (data.startsWith('submit_')) {
             const states = loadStates();
-            const [dealId, paymentVariant] = data.split('_').slice(1);
+            const parts = data.split('_').slice(1);
+            if (parts.length < 1) {
+                await ctx.answerCbQuery(MESSAGES.ERROR_INVALID_DATA, { show_alert: true });
+                return;
+            }
+            const [dealId, paymentVariant] = parts;
+            if (!dealId) {
+                await ctx.answerCbQuery(MESSAGES.ERROR_INVALID_DATA, { show_alert: true });
+                return;
+            }
             const dealIndex = deals.findIndex(d => d.id === dealId && d.status === 'draft');
             if (dealIndex === -1) {
                 await ctx.answerCbQuery(MESSAGES.ERROR_DEAL_NOT_FOUND_OR_PROCESSED, { show_alert: true });
@@ -2620,7 +2811,12 @@ main_bot.on('callback_query', async ctx => {
 
         if (data.startsWith('payment_done_')) {
             const states = loadStates();
-            const dealId = data.split('_')[2];
+            const parts = data.split('_');
+            if (parts.length < 3) {
+                await ctx.answerCbQuery(MESSAGES.ERROR_INVALID_DATA, { show_alert: true });
+                return;
+            }
+            const dealId = parts[2];
             const dealIndex = deals.findIndex(d => d.id === dealId && d.status === 'unpaid');
             if (dealIndex === -1) {
                 await ctx.answerCbQuery(MESSAGES.ERROR_DEAL_NOT_FOUND_OR_PROCESSED, { show_alert: true });
@@ -2809,7 +3005,12 @@ main_bot.on('callback_query', async ctx => {
         if (data.startsWith('attach_tx_hash_')) {
             const states = loadStates();
             clearPendingStates(states, from);
-            const dealId = data.split('_')[3];
+            const parts = data.split('_');
+            if (parts.length < 4) {
+                await ctx.answerCbQuery(MESSAGES.ERROR_INVALID_DATA, { show_alert: true });
+                return;
+            }
+            const dealId = parts[3];
             const dealIndex = deals.findIndex(d => d.id === dealId && d.status === 'pending');
             if (dealIndex === -1) {
                 await ctx.answerCbQuery(MESSAGES.ERROR_DEAL_NOT_FOUND_OR_PROCESSED, { show_alert: true });
@@ -2829,7 +3030,12 @@ main_bot.on('callback_query', async ctx => {
 
         if (data.startsWith('cancel_deal_')) {
             const states = loadStates();
-            const dealId = data.split('_')[2];
+            const parts = data.split('_');
+            if (parts.length < 3) {
+                await ctx.answerCbQuery(MESSAGES.ERROR_INVALID_DATA, { show_alert: true });
+                return;
+            }
+            const dealId = parts[2];
             const dealIndex = deals.findIndex(d => d.id === dealId && d.status !== 'completed' && d.status !== 'expired');
             
             if (dealIndex === -1) {
@@ -2880,7 +3086,12 @@ main_bot.on('callback_query', async ctx => {
         }
 
         if (data.startsWith('operator_delete_deal_')) {
-            const dealId = data.split('_')[3];
+            const parts = data.split('_');
+            if (parts.length < 4) {
+                await ctx.answerCbQuery(MESSAGES.ERROR_INVALID_DATA, { show_alert: true });
+                return;
+            }
+            const dealId = parts[3];
             try {
                 let deals = loadJson('deals');
                 const dealIndex = deals.findIndex(d => d.id === dealId);
@@ -2913,7 +3124,12 @@ main_bot.on('callback_query', async ctx => {
         }
 
         if (data.startsWith('operator_complete_deal_')) {
-            const dealId = data.split('_')[3];
+            const parts = data.split('_');
+            if (parts.length < 4) {
+                await ctx.answerCbQuery(MESSAGES.ERROR_INVALID_DATA, { show_alert: true });
+                return;
+            }
+            const dealId = parts[3];
             try {
                 let deals = loadJson('deals');
                 const dealIndex = deals.findIndex(d => d.id === dealId);
@@ -2956,7 +3172,9 @@ main_bot.on('callback_query', async ctx => {
                     states.pendingDeal[user.id] = { messageId: message.message_id };
                     saveJson('states', states);
                 } catch (error) {
-                    console.error(`Error sending completion notification to user ${user.id}:`, error.message);
+                    if (shouldLogSendError(error)) {
+                        console.error(`Error sending completion notification to user ${user.id}:`, error.message);
+                    }
                 }
 
                 const referrer = users.find(u => u.referrals && u.referrals.includes(deal.userId));
@@ -2974,7 +3192,9 @@ main_bot.on('callback_query', async ctx => {
                             caption: `🎉 Реферальный бонус! +${commissionBTC.toFixed(8)} BTC (~${earningsRub.toFixed(2)}) за сделку ID ${deal.id}`
                         });
                     } catch (error) {
-                        console.error(`Error sending notification to referrer ${referrer.id}:`, error.message);
+                        if (shouldLogSendError(error)) {
+                            console.error(`Error sending notification to referrer ${referrer.id}:`, error.message);
+                        }
                     }
                 }
 
@@ -2997,7 +3217,12 @@ main_bot.on('callback_query', async ctx => {
         }
 
         if (data.startsWith('operator_complete_withdrawal_')) {
-            const withdrawalId = data.split('_')[3];
+            const parts = data.split('_');
+            if (parts.length < 4) {
+                await ctx.answerCbQuery(MESSAGES.ERROR_INVALID_DATA, { show_alert: true });
+                return;
+            }
+            const withdrawalId = parts[3];
             try {
                 let withdrawals = loadJson('withdrawals');
                 const withdrawalIndex = withdrawals.findIndex(w => w.id === withdrawalId);
@@ -3008,6 +3233,10 @@ main_bot.on('callback_query', async ctx => {
                 }
 
                 const withdrawal = withdrawals[withdrawalIndex];
+                if (!withdrawal || !withdrawal.userId || typeof withdrawal.cryptoAmount !== 'number' || typeof withdrawal.rubAmount !== 'number' || !withdrawal.walletAddress) {
+                    await ctx.answerCbQuery(MESSAGES.ERROR_WITHDRAWAL_DATA_NOT_FOUND, { show_alert: true });
+                    return;
+                }
                 withdrawals[withdrawalIndex] = { ...withdrawal, status: 'completed' };
                 saveJson('withdrawals', withdrawals);
 
@@ -3027,7 +3256,9 @@ main_bot.on('callback_query', async ctx => {
                     states.pendingWithdrawal[userId] = { messageId: message.message_id };
                     saveJson('states', states);
                 } catch (error) {
-                    console.error(`Error sending withdrawal completion notification to user ${userId}:`, error.message);
+                    if (shouldLogSendError(error)) {
+                        console.error(`Error sending withdrawal completion notification to user ${userId}:`, error.message);
+                    }
                 }
 
                 try {
@@ -3084,12 +3315,22 @@ main_bot.on('callback_query', async ctx => {
         }
     } catch (error) {
         console.error('Error processing callback query:', error.message);
-        await ctx.answerCbQuery(MESSAGES.ERROR_CALLBACK_PROCESSING, { show_alert: true });
+        if (error.stack) {
+            console.error('Stack:', error.stack);
+        }
+        try {
+            await ctx.answerCbQuery(MESSAGES.ERROR_CALLBACK_PROCESSING, { show_alert: true });
+        } catch (answerError) {
+            console.error('Error answering callback query:', answerError.message);
+        }
     }
 });
 
 main_bot.catch((err, ctx) => {
-    console.error(`Telegraf error for update ${ctx.update.update_id}:`, err);
+    console.error(`Telegraf error for update ${ctx?.update?.update_id || 'unknown'}:`, err);
+    if (err.stack) {
+        console.error('Error stack:', err.stack);
+    }
 });
 
 function getBot() {
@@ -3113,6 +3354,21 @@ process.once('SIGINT', async () => {
 process.once('SIGTERM', async () => {
     await stopBot();
     process.exit(0);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+    if (reason && reason.stack) {
+        console.error('Stack:', reason.stack);
+    }
+});
+
+process.on('uncaughtException', (error) => {
+    console.error('Uncaught Exception:', error);
+    if (error.stack) {
+        console.error('Stack:', error.stack);
+    }
+    process.exit(1);
 });
 
 module.exports = { getBot, stopBot };

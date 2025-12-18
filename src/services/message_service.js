@@ -132,10 +132,7 @@ function buildDealReplyMarkup(deal, operatorContactUrl, selectedPaymentDetails) 
 function buildPaymentSystemText(paymentVariant, paymentOption, paymentMethodName) {
     if (!paymentVariant) return '';
     
-    const paymentOptionName = paymentOption && PAYMENT_OPTION_NAMES[paymentOption] ? PAYMENT_OPTION_NAMES[paymentOption] : '';
-    const paymentOptionText = paymentOptionName ? ` (${paymentOptionName})` : '';
-    
-    return `Платёжная система: Карта - ${paymentMethodName}${paymentOptionText}\n`;
+    return `Платёжная система: Карта - ${paymentMethodName}\n`;
 }
 
 function buildOperatorDealMessage(deal, user, paymentSystemText, paymentDetailsText) {

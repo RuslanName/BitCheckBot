@@ -6,6 +6,7 @@ const fs = require('fs-extra');
 const { loadJson, saveJson } = require('../utils/storage_utils');
 const { authenticateToken, restrictTo } = require('../middleware/auth_middleware');
 const { TELEGRAM_API, DATA_PATH } = require('../config/constants');
+const { shouldLogSendError } = require('../utils');
 
 const router = express.Router();
 
@@ -73,7 +74,9 @@ router.patch('/withdrawals/:id/complete', authenticateToken, restrictTo('mainAdm
                 timeout: 5000
             });
         } catch (error) {
-            console.error(`Error sending withdrawal notification to user ${userId}:`, error.message);
+            if (shouldLogSendError(error)) {
+                console.error(`Error sending withdrawal notification to user ${userId}:`, error.message);
+            }
         }
 
         res.json(withdrawals[idx]);

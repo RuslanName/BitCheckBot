@@ -235,43 +235,53 @@ function initializeDeals() {
                     tr.classList.remove('priority-elevated');
                 }
 
-                tr.onclick = (e) => {
+                tr.addEventListener('click', (e) => {
                     if (e.target.tagName === 'BUTTON' || e.target.tagName === 'A') return;
                     e.preventDefault();
+                    e.stopPropagation();
                     if (deal.status === 'completed' || deal.status === 'expired') return;
 
-                    if ((e.ctrlKey || e.metaKey) || e.shiftKey) {
-                        if (e.shiftKey && lastSelectedDealId) {
-                            const currentIndex = Array.from(allRows).findIndex(row => row.dataset.id === dealId);
-                            const lastIndex = Array.from(allRows).findIndex(row => row.dataset.id === lastSelectedDealId);
-                            const startIndex = Math.min(currentIndex, lastIndex);
-                            const endIndex = Math.max(currentIndex, lastIndex);
+                    const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+                    const isMultiSelect = isMac ? e.metaKey : e.ctrlKey;
+                    const isRangeSelect = e.shiftKey;
 
-                            for (let i = startIndex; i <= endIndex; i++) {
-                                const rowDealId = allRows[i].dataset.id;
-                                const rowDeal = deals.find(d => d.id === rowDealId);
-                                if (rowDeal && rowDeal.status !== 'completed' && rowDeal.status !== 'expired' && !selectedDeals.has(rowDealId)) {
-                                    selectedDeals.add(rowDealId);
-                                    allRows[i].classList.add('selected');
-                                }
-                            }
-                        } else if (e.ctrlKey || e.metaKey) {
-                            if (selectedDeals.has(dealId)) {
-                                selectedDeals.delete(dealId);
-                                tr.classList.remove('selected');
-                                lastSelectedDealId = Array.from(selectedDeals).pop() || null;
-                            } else {
-                                selectedDeals.add(dealId);
-                                tr.classList.add('selected');
-                                lastSelectedDealId = dealId;
+                    if (isRangeSelect && lastSelectedDealId) {
+                        const currentIndex = Array.from(allRows).findIndex(row => row.dataset.id === dealId);
+                        const lastIndex = Array.from(allRows).findIndex(row => row.dataset.id === lastSelectedDealId);
+                        const startIndex = Math.min(currentIndex, lastIndex);
+                        const endIndex = Math.max(currentIndex, lastIndex);
+
+                        for (let i = startIndex; i <= endIndex; i++) {
+                            const rowDealId = allRows[i].dataset.id;
+                            const rowDeal = deals.find(d => d.id === rowDealId);
+                            if (rowDeal && rowDeal.status !== 'completed' && rowDeal.status !== 'expired' && !selectedDeals.has(rowDealId)) {
+                                selectedDeals.add(rowDealId);
+                                allRows[i].classList.add('selected');
                             }
                         }
+                        lastSelectedDealId = dealId;
+                    } else if (isMultiSelect) {
+                        if (selectedDeals.has(dealId)) {
+                            selectedDeals.delete(dealId);
+                            tr.classList.remove('selected');
+                            lastSelectedDealId = Array.from(selectedDeals).pop() || null;
+                        } else {
+                            selectedDeals.add(dealId);
+                            tr.classList.add('selected');
+                            lastSelectedDealId = dealId;
+                        }
+                    } else {
+                        selectedDeals.clear();
+                        allRows.forEach(row => row.classList.remove('selected'));
+                        selectedDeals.add(dealId);
+                        tr.classList.add('selected');
+                        lastSelectedDealId = dealId;
                     }
 
                     const table = document.querySelector('table');
                     table.style.userSelect = selectedDeals.size > 0 ? 'none' : 'auto';
                     bulkActionContainer.style.display = selectedDeals.size > 0 ? 'flex' : 'none';
-                };
+                });
             });
 
             document.querySelectorAll('.delete-deal').forEach(btn => {

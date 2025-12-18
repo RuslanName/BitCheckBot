@@ -173,46 +173,56 @@ function initializeWithdrawals() {
             bulkActionContainer.style.display = selectedWithdrawals.size > 0 ? 'flex' : 'none';
 
             document.querySelectorAll('tr[data-id]').forEach(tr => {
-                tr.onclick = (e) => {
+                tr.addEventListener('click', (e) => {
                     if (e.target.tagName === 'BUTTON' || e.target.tagName === 'A') return;
                     e.preventDefault();
+                    e.stopPropagation();
                     const withdrawalId = tr.dataset.id;
                     const withdrawal = withdrawals.find(w => w.id === withdrawalId);
                     if (withdrawal.status === 'completed') return;
 
-                    if ((e.ctrlKey || e.metaKey) || e.shiftKey) {
-                        if (e.shiftKey && lastSelectedWithdrawalId) {
-                            const allRows = Array.from(document.querySelectorAll('tr[data-id]'));
-                            const currentIndex = allRows.findIndex(row => row.dataset.id === withdrawalId);
-                            const lastIndex = allRows.findIndex(row => row.dataset.id === lastSelectedWithdrawalId);
-                            const startIndex = Math.min(currentIndex, lastIndex);
-                            const endIndex = Math.max(currentIndex, lastIndex);
+                    const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+                    const isMultiSelect = isMac ? e.metaKey : e.ctrlKey;
+                    const isRangeSelect = e.shiftKey;
 
-                            for (let i = startIndex; i <= endIndex; i++) {
-                                const rowWithdrawalId = allRows[i].dataset.id;
-                                const rowWithdrawal = withdrawals.find(w => w.id === rowWithdrawalId);
-                                if (rowWithdrawal.status !== 'completed' && !selectedWithdrawals.has(rowWithdrawalId)) {
-                                    selectedWithdrawals.add(rowWithdrawalId);
-                                    allRows[i].classList.add('selected');
-                                }
-                            }
-                        } else if (e.ctrlKey || e.metaKey) {
-                            if (selectedWithdrawals.has(withdrawalId)) {
-                                selectedWithdrawals.delete(withdrawalId);
-                                tr.classList.remove('selected');
-                                lastSelectedWithdrawalId = Array.from(selectedWithdrawals).pop() || null;
-                            } else {
-                                selectedWithdrawals.add(withdrawalId);
-                                tr.classList.add('selected');
-                                lastSelectedWithdrawalId = withdrawalId;
+                    if (isRangeSelect && lastSelectedWithdrawalId) {
+                        const allRows = Array.from(document.querySelectorAll('tr[data-id]'));
+                        const currentIndex = allRows.findIndex(row => row.dataset.id === withdrawalId);
+                        const lastIndex = allRows.findIndex(row => row.dataset.id === lastSelectedWithdrawalId);
+                        const startIndex = Math.min(currentIndex, lastIndex);
+                        const endIndex = Math.max(currentIndex, lastIndex);
+
+                        for (let i = startIndex; i <= endIndex; i++) {
+                            const rowWithdrawalId = allRows[i].dataset.id;
+                            const rowWithdrawal = withdrawals.find(w => w.id === rowWithdrawalId);
+                            if (rowWithdrawal.status !== 'completed' && !selectedWithdrawals.has(rowWithdrawalId)) {
+                                selectedWithdrawals.add(rowWithdrawalId);
+                                allRows[i].classList.add('selected');
                             }
                         }
+                        lastSelectedWithdrawalId = withdrawalId;
+                    } else if (isMultiSelect) {
+                        if (selectedWithdrawals.has(withdrawalId)) {
+                            selectedWithdrawals.delete(withdrawalId);
+                            tr.classList.remove('selected');
+                            lastSelectedWithdrawalId = Array.from(selectedWithdrawals).pop() || null;
+                        } else {
+                            selectedWithdrawals.add(withdrawalId);
+                            tr.classList.add('selected');
+                            lastSelectedWithdrawalId = withdrawalId;
+                        }
+                    } else {
+                        selectedWithdrawals.clear();
+                        document.querySelectorAll('tr[data-id]').forEach(row => row.classList.remove('selected'));
+                        selectedWithdrawals.add(withdrawalId);
+                        tr.classList.add('selected');
+                        lastSelectedWithdrawalId = withdrawalId;
                     }
 
                     const table = document.querySelector('table');
                     table.style.userSelect = selectedWithdrawals.size > 0 ? 'none' : 'auto';
                     bulkActionContainer.style.display = selectedWithdrawals.size > 0 ? 'flex' : 'none';
-                };
+                });
             });
 
             document.querySelectorAll('.complete-withdrawal:not(:disabled)').forEach(btn => {
