@@ -17,6 +17,8 @@ async function updatePrices() {
         cachedLtcRubPrice = response.data.litecoin.rub || cachedLtcRubPrice;
         lastPriceUpdate = now;
     } catch (error) {
+        console.error('Failed to update prices:', error.message);
+        
         if (error.response && error.response.status === 429) {
             await new Promise(resolve => setTimeout(resolve, 5000));
             try {
@@ -25,10 +27,8 @@ async function updatePrices() {
                 cachedLtcRubPrice = retryResponse.data.litecoin.rub || cachedLtcRubPrice;
                 lastPriceUpdate = now;
             } catch (retryError) {
-                throw new Error(`Failed to update prices after retry: ${retryError.message}`);
+                console.error('Failed to update prices after retry:', retryError.message);
             }
-        } else {
-            throw new Error(`Failed to update prices: ${error.message}`);
         }
     }
 }
@@ -43,7 +43,11 @@ async function getLtcRubPrice() {
     return cachedLtcRubPrice;
 }
 
-setInterval(updatePrices, CACHE_DURATION);
+setInterval(() => {
+    updatePrices().catch(error => {
+        console.error('Error updating prices in interval:', error.message);
+    });
+}, CACHE_DURATION);
 
 function getLastPriceUpdate() {
     return lastPriceUpdate;
