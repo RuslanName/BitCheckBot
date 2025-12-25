@@ -131,3 +131,8 @@ td:not(:has(button)):not(:has(input)):not(:has(select)) {
 .edit-array-btn {
     margin-top: 8px;
 }
+
+.number-separator {
+    display: inline-block;
+    width: 0.15em;
+}

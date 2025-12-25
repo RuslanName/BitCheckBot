@@ -140,10 +140,23 @@ async function scheduleTasks() {
         if (!Array.isArray(broadcasts)) {
             console.error('Invalid broadcasts data format');
         } else {
-            for (const broadcast of broadcasts) {
+            for (let i = 0; i < broadcasts.length; i++) {
+                const broadcast = broadcasts[i];
                 if (!broadcast.id || !broadcast.scheduledTime || broadcast.status === 'sent') {
                     console.log(`Broadcast ${broadcast.id || 'without ID'} has no scheduledTime, ID, or is already sent, skipping`);
                     continue;
+                }
+
+                if (broadcast.status === 'sending') {
+                    const lastAttempt = broadcast.lastAttemptTime;
+                    if (lastAttempt && Date.now() - new Date(lastAttempt).getTime() < 3600000) {
+                        console.log(`Broadcast ${broadcast.id} is already being sent, skipping`);
+                        continue;
+                    } else {
+                        broadcasts[i].status = 'pending';
+                        delete broadcasts[i].lastAttemptTime;
+                        saveJson('broadcasts', broadcasts);
+                    }
                 }
 
                 const scheduledTime = new Date(broadcast.scheduledTime);
@@ -192,10 +205,28 @@ async function scheduleTasks() {
         if (!Array.isArray(raffles)) {
             console.error('Invalid raffles data format');
         } else {
-            for (const raffle of raffles) {
+            for (let i = 0; i < raffles.length; i++) {
+                let raffle = raffles[i];
                 if (!raffle.id || !raffle.startDate || !raffle.endDate || raffle.status === 'completed') {
                     console.log(`Raffle ${raffle.id || 'without ID'} has no startDate, endDate, ID, or is already completed, skipping`);
                     continue;
+                }
+
+                if (raffle.status === 'sending_notification' || raffle.status === 'sending_results') {
+                    const lastAttempt = raffle.lastAttemptTime;
+                    if (lastAttempt && Date.now() - new Date(lastAttempt).getTime() < 3600000) {
+                        console.log(`Raffle ${raffle.id} is already being processed, skipping`);
+                        continue;
+                    } else {
+                        if (raffle.status === 'sending_notification') {
+                            raffles[i].status = 'pending';
+                        } else {
+                            raffles[i].status = 'active';
+                        }
+                        delete raffles[i].lastAttemptTime;
+                        saveJson('raffles', raffles);
+                        raffle = raffles[i];
+                    }
                 }
 
                 const startDate = new Date(raffle.startDate);
@@ -354,6 +385,14 @@ async function sendBroadcast(broadcast) {
         return false;
     }
 
+    if (broadcasts[broadcastIndex].status === 'sending') {
+        const lastAttempt = broadcasts[broadcastIndex].lastAttemptTime;
+        if (lastAttempt && Date.now() - new Date(lastAttempt).getTime() < 3600000) {
+            console.log(`Broadcast ${broadcast.id} is already being sent, skipping`);
+            return false;
+        }
+    }
+
     let photoSource;
     let imagePath = null;
     if (broadcast.file_id) {
@@ -369,12 +408,16 @@ async function sendBroadcast(broadcast) {
         }
     }
 
-    broadcasts[broadcastIndex].status = 'sent';
+    broadcasts[broadcastIndex].status = 'sending';
+    broadcasts[broadcastIndex].lastAttemptTime = new Date().toISOString();
     saveJson('broadcasts', broadcasts);
 
     const users = loadJson('users') || [];
     if (!Array.isArray(users)) {
         console.error('Invalid users data format');
+        broadcasts[broadcastIndex].status = 'pending';
+        delete broadcasts[broadcastIndex].lastAttemptTime;
+        saveJson('broadcasts', broadcasts);
         return false;
     }
 
@@ -385,6 +428,7 @@ async function sendBroadcast(broadcast) {
         batches.push(users.slice(i, i + BATCH_SIZE));
     }
 
+    let fileIdSaved = false;
     const queue = async.queue(async (user, callback) => {
         if (!user.id || !(await isValidChat(user.id))) {
             callback();
@@ -397,13 +441,14 @@ async function sendBroadcast(broadcast) {
             };
             let msg = await main_bot.telegram.sendPhoto(user.id, photoSource, options);
 
-            if (!broadcast.file_id && typeof photoSource !== 'string') {
+            if (!fileIdSaved && !broadcast.file_id && typeof photoSource !== 'string' && msg.photo && msg.photo.length > 0) {
                 broadcasts = loadJson('broadcasts') || [];
                 const currentBroadcast = broadcasts.find(b => b.id === broadcast.id);
-                if (currentBroadcast && msg.photo && msg.photo.length > 0) {
+                if (currentBroadcast) {
                     currentBroadcast.file_id = msg.photo[msg.photo.length - 1].file_id;
                     saveJson('broadcasts', broadcasts);
                     photoSource = currentBroadcast.file_id;
+                    fileIdSaved = true;
                 }
             }
         } catch (error) {
@@ -428,23 +473,30 @@ async function sendBroadcast(broadcast) {
         return false;
     }
 
+    delete updatedBroadcast.lastAttemptTime;
+
     if (broadcast.isDaily) {
         const now = new Date();
+        const scheduledDate = new Date(broadcast.scheduledTime);
         const nextDay = new Date(
             now.getFullYear(),
             now.getMonth(),
             now.getDate() + 1,
-            new Date(broadcast.scheduledTime).getHours(),
-            new Date(broadcast.scheduledTime).getMinutes()
+            scheduledDate.getUTCHours(),
+            scheduledDate.getUTCMinutes()
         );
         updatedBroadcast.scheduledTime = nextDay.toISOString();
         updatedBroadcast.status = 'pending';
     } else {
-        broadcasts = broadcasts.filter(b => b.id !== broadcast.id);
+        if (success) {
+            broadcasts = broadcasts.filter(b => b.id !== broadcast.id);
+        } else {
+            updatedBroadcast.status = 'pending';
+        }
     }
     saveJson('broadcasts', broadcasts);
 
-    if (imagePath && !updatedBroadcast.file_id && !broadcast.isDaily) {
+    if (imagePath && !updatedBroadcast.file_id && !broadcast.isDaily && success) {
         try {
             await fs.unlink(imagePath);
         } catch (err) {
@@ -463,12 +515,29 @@ async function sendRaffleNotification(raffle) {
         return;
     }
 
+    if (raffles[raffleIndex].status === 'sending_notification') {
+        const lastAttempt = raffles[raffleIndex].lastAttemptTime;
+        if (lastAttempt && Date.now() - new Date(lastAttempt).getTime() < 3600000) {
+            console.log(`Raffle notification ${raffle.id} is already being sent, skipping`);
+            return;
+        }
+    }
+
     if (raffles[raffleIndex].status !== 'pending') {
         console.log(`Raffle ${raffle.id} is not pending, skipping notification`);
         return;
     }
 
     const users = loadJson('users') || [];
+    if (!Array.isArray(users) || users.length === 0) {
+        console.error('Invalid users data format or empty users list');
+        return;
+    }
+
+    raffles[raffleIndex].status = 'sending_notification';
+    raffles[raffleIndex].lastAttemptTime = new Date().toISOString();
+    saveJson('raffles', raffles);
+
     const conditionText = raffle.condition.type === 'dealCount'
         ? `Необходимо совершить не менее ${raffle.condition.value} сделок`
         : `Необходимо совершить сделок на сумму не менее ${raffle.condition.value} RUB`;
@@ -511,6 +580,7 @@ async function sendRaffleNotification(raffle) {
     const updatedRaffle = raffles.find(r => r.id === raffle.id);
     if (updatedRaffle) {
         updatedRaffle.status = 'active';
+        delete updatedRaffle.lastAttemptTime;
         saveJson('raffles', raffles);
     }
 }
@@ -528,9 +598,19 @@ async function processRaffleEnd(raffle) {
         return;
     }
 
-    const { winners } = generateRaffleResults(raffle);
-    raffles[raffleIndex] = { ...raffles[raffleIndex], status: 'completed' };
+    if (raffles[raffleIndex].status === 'sending_results') {
+        const lastAttempt = raffles[raffleIndex].lastAttemptTime;
+        if (lastAttempt && Date.now() - new Date(lastAttempt).getTime() < 3600000) {
+            console.log(`Raffle results ${raffle.id} is already being sent, skipping`);
+            return;
+        }
+    }
+
+    raffles[raffleIndex].status = 'sending_results';
+    raffles[raffleIndex].lastAttemptTime = new Date().toISOString();
     saveJson('raffles', raffles);
+
+    const { winners } = generateRaffleResults(raffle);
     cronTasks.delete(`raffle_${raffle.id}`);
     cronTasks.delete(`raffle_notification_${raffle.id}`);
 
@@ -548,6 +628,14 @@ async function processRaffleEnd(raffle) {
     const BATCH_SIZE = 25;
     const batchDelay = 10000;
     const users = loadJson('users') || [];
+    if (!Array.isArray(users) || users.length === 0) {
+        console.error('Invalid users data format or empty users list');
+        raffles[raffleIndex].status = 'active';
+        delete raffles[raffleIndex].lastAttemptTime;
+        saveJson('raffles', raffles);
+        return;
+    }
+
     const config = loadJson('config');
     const operators = config.multipleOperatorsData || [];
     const operatorUsernames = operators.map(op => op.username);
@@ -607,6 +695,14 @@ async function processRaffleEnd(raffle) {
         batch.forEach(user => queue.push(user));
         await queue.drain();
         await new Promise(resolve => setTimeout(resolve, batchDelay));
+    }
+
+    raffles = loadJson('raffles') || [];
+    const updatedRaffle = raffles.find(r => r.id === raffle.id);
+    if (updatedRaffle) {
+        updatedRaffle.status = 'completed';
+        delete updatedRaffle.lastAttemptTime;
+        saveJson('raffles', raffles);
     }
 }
 

@@ -53,9 +53,9 @@ function getOperators(currency) {
 }
 
 async function isValidChat(chatId) {
-    const { Telegraf } = require('telegraf');
-    const { MAIN_BOT_TOKEN } = require('../config/constants');
-    const bot = new Telegraf(MAIN_BOT_TOKEN);
+    const { getMainBotInstance } = require('../utils/telegram_utils');
+    const bot = getMainBotInstance();
+    
     try {
         await bot.telegram.getChat(chatId);
         return true;

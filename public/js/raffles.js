@@ -1,4 +1,4 @@
-import { api, formatDateTime, checkAuth } from './utils.js';
+import { api, formatDateTime, formatNumber, checkAuth } from './utils.js';
 import { initializeSidebar, checkAccess } from './sidebar.js';
 
 function initializeRaffles() {
@@ -271,7 +271,7 @@ function initializeRaffles() {
                 const tr = document.createElement('tr');
                 const isCompleted = r.status === 'completed';
                 const conditionText = r.condition.type === 'dealCount' ? `Количество сделок: ${r.condition.value || '-'}` :
-                    `Сумма сделок: ${r.condition.value || '-'} RUB`;
+                    `Сумма сделок: ${r.condition.value ? formatNumber(r.condition.value, 2) : '-'} RUB`;
                 tr.innerHTML = `
                     <td>${r.id}</td>
                     <td>${formatDateTime(r.startDate)} - ${formatDateTime(r.endDate)}</td>

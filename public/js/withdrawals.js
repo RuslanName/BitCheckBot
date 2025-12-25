@@ -1,4 +1,4 @@
-import { api, formatDateTime, checkAuth } from './utils.js';
+import { api, formatDateTime, formatNumber, checkAuth } from './utils.js';
 import { initializeSidebar, checkAccess } from './sidebar.js';
 
 function initializeWithdrawals() {
@@ -153,8 +153,8 @@ function initializeWithdrawals() {
                 tr.innerHTML = `
                     <td>${buttonId}</td>
                     <td>${username}</td>
-                    <td>${w.rubAmount}</td>
-                    <td>${w.cryptoAmount}</td>
+                    <td>${formatNumber(w.rubAmount, 2)}</td>
+                    <td>${formatNumber(w.cryptoAmount, 8)}</td>
                     <td>${w.walletAddress}</td>
                     <td>${formatDateTime(w.timestamp)}</td>
                     <td>

@@ -1,4 +1,4 @@
-import { api, checkAuth } from './utils.js';
+import { api, formatNumber, checkAuth } from './utils.js';
 import { initializeSidebar, checkAccess } from './sidebar.js';
 
 function initializeAnalytics() {
@@ -79,13 +79,13 @@ function initializeAnalytics() {
                 const dealCount = completedDeals.length;
                 const dealAmount = completedDeals.reduce((sum, d) => sum + (d.total || d.rubAmount || 0), 0);
                 document.getElementById(`deals${period.charAt(0).toUpperCase() + period.slice(1)}Count`).textContent = dealCount;
-                document.getElementById(`deals${period.charAt(0).toUpperCase() + period.slice(1)}Amount`).textContent = dealAmount.toFixed(2);
+                document.getElementById(`deals${period.charAt(0).toUpperCase() + period.slice(1)}Amount`).innerHTML = formatNumber(dealAmount, 2);
             });
 
             periods.forEach(period => {
                 const completedDeals = deals.filter(d => d.status === 'completed' && getPeriodFilter(period)(d));
                 const commissionTotal = completedDeals.reduce((sum, d) => sum + (d.commission || 0), 0);
-                document.getElementById(`commission${period.charAt(0).toUpperCase() + period.slice(1)}`).textContent = commissionTotal.toFixed(2);
+                document.getElementById(`commission${period.charAt(0).toUpperCase() + period.slice(1)}`).innerHTML = formatNumber(commissionTotal, 2);
             });
 
             periods.forEach(period => {

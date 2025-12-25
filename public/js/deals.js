@@ -1,4 +1,4 @@
-import { api, formatDateTime, checkAuth } from './utils.js';
+import { api, formatDateTime, formatNumber, checkAuth } from './utils.js';
 import { initializeSidebar, checkAccess } from './sidebar.js';
 
 function initializeDeals() {
@@ -190,11 +190,11 @@ function initializeDeals() {
                     <td><a href="https://t.me/${user.username}" target="_blank">${user.username || d.username}</a></td>
                     <td>${d.type === 'buy' ? 'Покупка' : 'Продажа'}</td>
                     <td>${d.currency}</td>
-                    <td>${d.rubAmount.toFixed(2)}</td>
-                    <td>${d.cryptoAmount.toFixed(8)}</td>
-                    <td>${d.commission.toFixed(2)}</td>
+                    <td>${formatNumber(d.rubAmount, 2)}</td>
+                    <td>${formatNumber(d.cryptoAmount, 8)}</td>
+                    <td>${formatNumber(d.commission, 2)}</td>
                     <td>${d.priority === 'elevated' ? 'Повышенный' : 'Обычный'}</td>
-                    <td>${d.total.toFixed(2)}</td>
+                    <td>${formatNumber(d.total, 2)}</td>
                     <td>${d.walletAddress}</td>
                     <td>${formatDateTime(d.timestamp)}</td>
                     <td>

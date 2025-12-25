@@ -1,4 +1,4 @@
-import { api, checkAuth } from './utils.js';
+import { api, formatNumber, checkAuth } from './utils.js';
 import { initializeSidebar, checkAccess } from './sidebar.js';
 
 const arrayKeys = [
@@ -522,7 +522,7 @@ function initializeConfig() {
                         key === 'sellCommissionScalePercentBTC' ||
                         key === 'buyCommissionScalePercentLTC' ||
                         key === 'sellCommissionScalePercentLTC') {
-                        const formattedItems = value.map(item => `${item.amount}: ${item[key.includes('Commission') ? 'commission' : 'discount']}`);
+                        const formattedItems = value.map(item => `${formatNumber(item.amount, 2)}: ${item[key.includes('Commission') ? 'commission' : 'discount']}`);
                         displayValue = '';
                         for (let i = 0; i < formattedItems.length; i += 2) {
                             const pair = [formattedItems[i]];

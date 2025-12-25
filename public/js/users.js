@@ -1,4 +1,4 @@
-import { api, formatDateTime, checkAuth } from './utils.js';
+import { api, formatDateTime, formatNumber, checkAuth } from './utils.js';
 import { initializeSidebar, checkAccess } from './sidebar.js';
 
 function initializeUsers() {
@@ -181,7 +181,7 @@ function initializeUsers() {
                         Покупка: ${buyCounts.join(' | ')}<br>
                         Продажа: ${sellCounts.join(' | ')}
                     </td>
-                    <td>${turnover.toFixed(2)}</td>
+                    <td>${formatNumber(turnover, 2)}</td>
                     <td><input type="number" value="${(u.balance || 0).toFixed(8)}" data-id="${u.id}" class="balance-input" step="0.00000001" /></td>
                     <td>
                         <label class="switch">

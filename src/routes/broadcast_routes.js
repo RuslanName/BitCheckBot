@@ -50,11 +50,9 @@ router.post('/broadcasts', authenticateToken, restrictTo('mainAdmin'), upload.si
             imageName: req.file ? req.file.filename : null,
             scheduledTime: req.body.scheduledTime || null,
             timestamp: new Date().toISOString(),
-            isDaily: req.body.isDaily === 'true'
+            isDaily: req.body.isDaily === 'true',
+            status: 'pending'
         };
-        if (!item.isDaily) {
-            item.status = 'pending';
-        }
         list.push(item);
         saveJson('broadcasts', list);
         if (req.broadcastEmitter) {

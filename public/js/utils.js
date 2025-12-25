@@ -25,6 +25,14 @@ function formatDateTime(isoDate, nullValue = '-') {
     }).replace(',', '');
 }
 
+function formatNumber(num, decimals = 2) {
+    if (num === null || num === undefined || isNaN(num)) return '-';
+    const numStr = parseFloat(num).toFixed(decimals);
+    const parts = numStr.split('.');
+    parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, '<span class="number-separator"> </span>');
+    return parts.join('.');
+}
+
 function checkAuth(callback) {
     const curr = window.location.pathname.replace(/\/$/, '').slice(1) || 'config';
     const token = localStorage.getItem('token');
@@ -51,4 +59,4 @@ function checkAuth(callback) {
     return { userRole, userCurrency };
 }
 
-export { api, formatDateTime, checkAuth };
+export { api, formatDateTime, formatNumber, checkAuth };
