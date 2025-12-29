@@ -1,6 +1,7 @@
 const axios = require('axios');
 const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
+const { axiosWithRetry } = require('../utils/retry_utils');
 
 class RosTrustProcessing {
     constructor(merchantApiUrl, merchantApiKey, merchantSecret) {
@@ -29,16 +30,18 @@ class RosTrustProcessing {
             });
             const signature = this.calculateSignature('POST', url, bodyContent);
 
-            const response = await axios.post(
-                url,
-                bodyContent,
-                {
-                    headers: {
-                        'X-Identity': this.merchantApiKey,
-                        'X-Signature': signature,
-                        'Content-Type': 'application/json'
+            const response = await axiosWithRetry(
+                () => axios.post(
+                    url,
+                    bodyContent,
+                    {
+                        headers: {
+                            'X-Identity': this.merchantApiKey,
+                            'X-Signature': signature,
+                            'Content-Type': 'application/json'
+                        }
                     }
-                }
+                )
             );
             return response.data;
         } catch (error) {
@@ -52,15 +55,17 @@ class RosTrustProcessing {
             const url = `${this.merchantApiUrl}/api/merchant/invoices/${id}/available-payment-variants`;
             const signature = this.calculateSignature('GET', url);
 
-            const response = await axios.get(
-                url,
-                {
-                    headers: {
-                        'X-Identity': this.merchantApiKey,
-                        'X-Signature': signature,
-                        'Content-Type': 'application/json'
+            const response = await axiosWithRetry(
+                () => axios.get(
+                    url,
+                    {
+                        headers: {
+                            'X-Identity': this.merchantApiKey,
+                            'X-Signature': signature,
+                            'Content-Type': 'application/json'
+                        }
                     }
-                }
+                )
             );
             return response.data;
         } catch (error) {
@@ -77,16 +82,18 @@ class RosTrustProcessing {
             });
             const signature = this.calculateSignature('POST', url, bodyContent);
 
-            const response = await axios.post(
-                url,
-                bodyContent,
-                {
-                    headers: {
-                        'X-Identity': this.merchantApiKey,
-                        'X-Signature': signature,
-                        'Content-Type': 'application/json'
+            const response = await axiosWithRetry(
+                () => axios.post(
+                    url,
+                    bodyContent,
+                    {
+                        headers: {
+                            'X-Identity': this.merchantApiKey,
+                            'X-Signature': signature,
+                            'Content-Type': 'application/json'
+                        }
                     }
-                }
+                )
             );
             return response.data;
         } catch (error) {
@@ -100,15 +107,17 @@ class RosTrustProcessing {
             const url = `${this.merchantApiUrl}/api/merchant/invoices/${id}`;
             const signature = this.calculateSignature('GET', url);
 
-            const response = await axios.get(
-                url,
-                {
-                    headers: {
-                        'X-Identity': this.merchantApiKey,
-                        'X-Signature': signature,
-                        'Content-Type': 'application/json'
+            const response = await axiosWithRetry(
+                () => axios.get(
+                    url,
+                    {
+                        headers: {
+                            'X-Identity': this.merchantApiKey,
+                            'X-Signature': signature,
+                            'Content-Type': 'application/json'
+                        }
                     }
-                }
+                )
             );
             return response.data;
         } catch (error) {
@@ -123,16 +132,18 @@ class RosTrustProcessing {
             const bodyContent = "";
             const signature = this.calculateSignature('POST', url, bodyContent);
 
-            const response = await axios.post(
-                url,
-                bodyContent,
-                {
-                    headers: {
-                        'X-Identity': this.merchantApiKey,
-                        'X-Signature': signature,
-                        'Content-Type': 'application/json'
+            const response = await axiosWithRetry(
+                () => axios.post(
+                    url,
+                    bodyContent,
+                    {
+                        headers: {
+                            'X-Identity': this.merchantApiKey,
+                            'X-Signature': signature,
+                            'Content-Type': 'application/json'
+                        }
                     }
-                }
+                )
             );
             return response.data;
         } catch (error) {
@@ -143,7 +154,9 @@ class RosTrustProcessing {
 
     async getPaymentMethodName(code) {
         try {
-            const response = await axios.get(`${this.merchantApiUrl}/api/public/payment-methods/RUB`);
+            const response = await axiosWithRetry(
+                () => axios.get(`${this.merchantApiUrl}/api/public/payment-methods/RUB`)
+            );
             const paymentMethods = response.data.reduce((acc, method) => {
                 acc[method.code] = method.name;
                 return acc;

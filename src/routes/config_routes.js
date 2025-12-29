@@ -5,18 +5,18 @@ const { authenticateToken, restrictTo } = require('../middleware/auth_middleware
 const router = express.Router();
 
 router.get('/config', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
-    const config = loadJson('config');
+    const config = loadJson('config') || {};
     const { adminLogin, adminPassword, ...restConfig } = config;
     res.json(restConfig);
 });
 
 router.get('/config/credentials', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
-    const config = loadJson('config');
+    const config = loadJson('config') || {};
     res.json({ login: config.adminLogin, password: config.adminPassword });
 });
 
 router.put('/config', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
-    const cfg = loadJson('config');
+    const cfg = loadJson('config') || {};
     const { adminLogin, adminPassword } = cfg;
     const updatedConfig = {
         ...cfg,
@@ -40,7 +40,7 @@ router.put('/config', authenticateToken, restrictTo('mainAdmin'), (req, res) => 
 
 router.put('/config/credentials', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
     const { login, password } = req.body;
-    const cfg = loadJson('config');
+    const cfg = loadJson('config') || {};
     if (login && password) {
         cfg.adminLogin = login;
         cfg.adminPassword = password;
@@ -52,29 +52,29 @@ router.put('/config/credentials', authenticateToken, restrictTo('mainAdmin'), (r
 });
 
 function getBotStatus() {
-    const config = loadJson('config');
+    const config = loadJson('config') || {};
     return config.botStatus !== false;
 }
 
 function setBotStatus(status) {
-    const config = loadJson('config');
+    const config = loadJson('config') || {};
     config.botStatus = status;
     saveJson('config', config);
 }
 
 function getProcessingStatus() {
-    const config = loadJson('config');
+    const config = loadJson('config') || {};
     const processingType = config.processingType || 'none';
     return processingType !== 'none';
 }
 
 function getProcessingType() {
-    const config = loadJson('config');
+    const config = loadJson('config') || {};
     return config.processingType || 'none';
 }
 
 function setProcessingType(type) {
-    const config = loadJson('config');
+    const config = loadJson('config') || {};
     if (!['none', 'ros_trust_processing', 'settlex_processing'].includes(type)) {
         throw new Error('Неверный тип процессинга');
     }
@@ -84,7 +84,7 @@ function setProcessingType(type) {
 }
 
 function setProcessingStatus(status) {
-    const config = loadJson('config');
+    const config = loadJson('config') || {};
     if (status) {
         if (!config.processingType || config.processingType === 'none') {
             config.processingType = 'ros_trust_processing';

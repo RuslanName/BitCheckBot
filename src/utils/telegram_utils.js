@@ -1,5 +1,6 @@
 const { Telegraf } = require('telegraf');
 const { BIT_CHECK_IMAGE_PATH, MAIN_BOT_TOKEN } = require('../config/constants');
+const { telegramWithRetry } = require('./retry_utils');
 
 let cachedBitCheckFileId = null;
 let mainBotInstance = null;
@@ -22,9 +23,13 @@ async function sendBitCheckPhoto(chatId, extra = {}) {
     
     let msg;
     if (cachedBitCheckFileId) {
-        msg = await bot.telegram.sendPhoto(chatId, cachedBitCheckFileId, extra);
+        msg = await telegramWithRetry(
+            () => bot.telegram.sendPhoto(chatId, cachedBitCheckFileId, extra)
+        );
     } else {
-        msg = await bot.telegram.sendPhoto(chatId, { source: BIT_CHECK_IMAGE_PATH }, extra);
+        msg = await telegramWithRetry(
+            () => bot.telegram.sendPhoto(chatId, { source: BIT_CHECK_IMAGE_PATH }, extra)
+        );
         cachedBitCheckFileId = msg.photo[msg.photo.length - 1].file_id;
     }
     return msg;

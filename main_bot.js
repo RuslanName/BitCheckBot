@@ -52,7 +52,8 @@ const {
     sendBitCheckPhoto,
     setMainBotInstance,
     generateCaptcha,
-    shouldLogSendError
+    shouldLogSendError,
+    telegramWithRetry
 } = require('./src/utils');
 const { getProcessing, isProcessingEnabled } = require('./src/integrations');
 
@@ -178,12 +179,21 @@ async function scheduleTasks() {
                     continue;
                 }
 
+                const mskOffset = 3 * 60 * 60 * 1000;
+                const mskTimeMs = scheduledTime.getTime() + mskOffset;
+                const mskTime = new Date(mskTimeMs);
+                const mskHours = mskTime.getUTCHours();
+                const mskMinutes = mskTime.getUTCMinutes();
+                const mskSeconds = mskTime.getUTCSeconds();
+                const mskDate = mskTime.getUTCDate();
+                const mskMonth = mskTime.getUTCMonth() + 1;
+                
                 let cronTime;
                 if (broadcast.isDaily) {
-                    cronTime = `0 ${scheduledTime.getUTCMinutes()} ${scheduledTime.getUTCHours()} * * *`;
+                    cronTime = `0 ${mskMinutes} ${mskHours} * * *`;
                     console.log(`Scheduled daily broadcast ${broadcast.id} with cron: ${cronTime}`);
                 } else {
-                    cronTime = `${scheduledTime.getUTCSeconds()} ${scheduledTime.getUTCMinutes()} ${scheduledTime.getUTCHours()} ${scheduledTime.getUTCDate()} ${scheduledTime.getUTCMonth() + 1} *`;
+                    cronTime = `${mskSeconds} ${mskMinutes} ${mskHours} ${mskDate} ${mskMonth} *`;
                     console.log(`Scheduled one-time broadcast ${broadcast.id} with cron: ${cronTime}`);
                 }
 
@@ -193,7 +203,7 @@ async function scheduleTasks() {
                     cronTasks.delete(broadcast.id);
                 }, {
                     scheduled: true,
-                    timezone: 'UTC'
+                    timezone: 'Europe/Moscow'
                 });
 
                 cronTasks.set(broadcast.id, task);
@@ -439,7 +449,9 @@ async function sendBroadcast(broadcast) {
             const options = {
                 caption: `${broadcast.text}\n\n${POST_SCRIPT}`
             };
-            let msg = await main_bot.telegram.sendPhoto(user.id, photoSource, options);
+            let msg = await telegramWithRetry(
+                () => main_bot.telegram.sendPhoto(user.id, photoSource, options)
+            );
 
             if (!fileIdSaved && !broadcast.file_id && typeof photoSource !== 'string' && msg.photo && msg.photo.length > 0) {
                 broadcasts = loadJson('broadcasts') || [];
@@ -478,14 +490,21 @@ async function sendBroadcast(broadcast) {
     if (broadcast.isDaily) {
         const now = new Date();
         const scheduledDate = new Date(broadcast.scheduledTime);
-        const nextDay = new Date(
+        const mskOffset = 3 * 60 * 60 * 1000;
+        const mskScheduledTimeMs = scheduledDate.getTime() + mskOffset;
+        const mskScheduledTime = new Date(mskScheduledTimeMs);
+        const mskHours = mskScheduledTime.getUTCHours();
+        const mskMinutes = mskScheduledTime.getUTCMinutes();
+        
+        const nextDayMs = new Date(
             now.getFullYear(),
             now.getMonth(),
             now.getDate() + 1,
-            scheduledDate.getUTCHours(),
-            scheduledDate.getUTCMinutes()
-        );
-        updatedBroadcast.scheduledTime = nextDay.toISOString();
+            mskHours,
+            mskMinutes
+        ).getTime();
+        const nextDayUTC = new Date(nextDayMs - mskOffset);
+        updatedBroadcast.scheduledTime = nextDayUTC.toISOString();
         updatedBroadcast.status = 'pending';
     } else {
         if (success) {

@@ -40,7 +40,13 @@ function initializeBroadcasts() {
         function openEditModal(broadcast) {
             const modal = document.createElement('div');
             modal.className = 'modal';
-            const scheduledTime = broadcast.scheduledTime ? new Date(broadcast.scheduledTime).toISOString().slice(0, 16) : '';
+            let scheduledTime = '';
+            if (broadcast.scheduledTime) {
+                const utcDate = new Date(broadcast.scheduledTime);
+                const mskOffset = 3 * 60 * 60 * 1000;
+                const mskDate = new Date(utcDate.getTime() + mskOffset);
+                scheduledTime = mskDate.toISOString().slice(0, 16);
+            }
             modal.innerHTML = `
                 <div class="modal-content">
                     <h3>Редактировать рассылку</h3>
@@ -88,7 +94,14 @@ function initializeBroadcasts() {
 
                 const formData = new FormData();
                 formData.append('content', content);
-                formData.append('scheduledTime', scheduledTimeInput ? new Date(scheduledTimeInput).toISOString() : '');
+                if (scheduledTimeInput) {
+                    const mskDate = new Date(scheduledTimeInput);
+                    const mskOffset = 3 * 60 * 60 * 1000;
+                    const utcDate = new Date(mskDate.getTime() - mskOffset);
+                    formData.append('scheduledTime', utcDate.toISOString());
+                } else {
+                    formData.append('scheduledTime', '');
+                }
                 formData.append('isDaily', isDaily.toString());
                 if (imageInput.files[0]) {
                     formData.append('image', imageInput.files[0]);
@@ -210,7 +223,14 @@ function initializeBroadcasts() {
 
                 const formData = new FormData();
                 formData.append('content', content);
-                formData.append('scheduledTime', scheduledTimeInput ? new Date(scheduledTimeInput).toISOString() : '');
+                if (scheduledTimeInput) {
+                    const mskDate = new Date(scheduledTimeInput);
+                    const mskOffset = 3 * 60 * 60 * 1000;
+                    const utcDate = new Date(mskDate.getTime() - mskOffset);
+                    formData.append('scheduledTime', utcDate.toISOString());
+                } else {
+                    formData.append('scheduledTime', '');
+                }
                 formData.append('isDaily', isDaily);
                 if (imageInput.files[0]) {
                     formData.append('image', imageInput.files[0]);

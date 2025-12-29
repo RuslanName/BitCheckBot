@@ -1,5 +1,6 @@
 const axios = require('axios');
 const { v4: uuidv4 } = require('uuid');
+const { axiosWithRetry } = require('../utils/retry_utils');
 
 class SettlexProcessing {
     constructor(merchantApiUrl, merchantApiKey) {
@@ -11,14 +12,16 @@ class SettlexProcessing {
         try {
             const url = `${this.merchantApiUrl}/api/merchant/methods`;
 
-            const response = await axios.get(
-                url,
-                {
-                    headers: {
-                        'x-merchant-api-key': this.merchantApiKey,
-                        'Content-Type': 'application/json'
+            const response = await axiosWithRetry(
+                () => axios.get(
+                    url,
+                    {
+                        headers: {
+                            'x-merchant-api-key': this.merchantApiKey,
+                            'Content-Type': 'application/json'
+                        }
                     }
-                }
+                )
             );
             return response.data;
         } catch (error) {
@@ -44,15 +47,17 @@ class SettlexProcessing {
                 expired_at: expired_at
             });
 
-            const response = await axios.post(
-                url,
-                bodyContent,
-                {
-                    headers: {
-                        'x-merchant-api-key': this.merchantApiKey,
-                        'Content-Type': 'application/json'
+            const response = await axiosWithRetry(
+                () => axios.post(
+                    url,
+                    bodyContent,
+                    {
+                        headers: {
+                            'x-merchant-api-key': this.merchantApiKey,
+                            'Content-Type': 'application/json'
+                        }
                     }
-                }
+                )
             );
             return { ...response.data, orderId: orderId };
         } catch (error) {
@@ -69,15 +74,17 @@ class SettlexProcessing {
         try {
             const url = `${this.merchantApiUrl}/api/merchant/transactions/by-order-id/${orderId}/cancel`;
 
-            const response = await axios.patch(
-                url,
-                null,
-                {
-                    headers: {
-                        'x-merchant-api-key': this.merchantApiKey,
-                        'Content-Type': 'application/json'
+            const response = await axiosWithRetry(
+                () => axios.patch(
+                    url,
+                    null,
+                    {
+                        headers: {
+                            'x-merchant-api-key': this.merchantApiKey,
+                            'Content-Type': 'application/json'
+                        }
                     }
-                }
+                )
             );
             return response.data;
         } catch (error) {
@@ -94,14 +101,16 @@ class SettlexProcessing {
         try {
             const url = `${this.merchantApiUrl}/api/merchant/transactions/status/${id}`;
 
-            const response = await axios.get(
-                url,
-                {
-                    headers: {
-                        'x-merchant-api-key': this.merchantApiKey,
-                        'Content-Type': 'application/json'
+            const response = await axiosWithRetry(
+                () => axios.get(
+                    url,
+                    {
+                        headers: {
+                            'x-merchant-api-key': this.merchantApiKey,
+                            'Content-Type': 'application/json'
+                        }
                     }
-                }
+                )
             );
             return response.data;
         } catch (error) {

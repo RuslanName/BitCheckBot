@@ -3,10 +3,10 @@ const axios = require('axios');
 const FormData = require('form-data');
 const path = require('path');
 const fs = require('fs-extra');
-const { loadJson, saveJson } = require('../utils/storage_utils');
+const { loadJson, saveJson, getUserById } = require('../utils/storage_utils');
 const { authenticateToken } = require('../middleware/auth_middleware');
 const { TELEGRAM_API, DATA_PATH } = require('../config/constants');
-const { shouldLogSendError } = require('../utils');
+const { shouldLogSendError, axiosWithRetry } = require('../utils');
 
 const router = express.Router();
 
@@ -20,8 +20,6 @@ router.get('/deals', authenticateToken, async (req, res) => {
         const term = search ? search.trim().toLowerCase() : '';
         const pageNum = parseInt(page, 10) || 1;
         const perPageNum = parseInt(perPage, 10) || 50;
-
-        const users = loadJson('users');
 
         let filtered = data.filter(d => {
             if (!d || d.status === 'draft') return false;
@@ -37,13 +35,13 @@ router.get('/deals', authenticateToken, async (req, res) => {
                 }
             }
             
-            const user = users.find(u => u.id === d.userId) || {};
             if (term) {
-            return (
-                (d.id && d.id.toString().includes(term)) ||
-                (d.userId && d.userId.toString().includes(term)) ||
-                (user.username && user.username.toLowerCase().includes(term))
-            );
+                const user = getUserById(d.userId) || {};
+                return (
+                    (d.id && d.id.toString().includes(term)) ||
+                    (d.userId && d.userId.toString().includes(term)) ||
+                    (user.username && user.username.toLowerCase().includes(term))
+                );
             }
             return true;
         });
@@ -117,10 +115,12 @@ router.patch('/deals/:id/complete', authenticateToken, async (req, res) => {
                     [{ text: '📞 Написать оператору', url: contactUrl }],
                 ]
             }));
-            await axios.post(`${TELEGRAM_API}/sendPhoto`, form, {
-                headers: form.getHeaders(),
-                timeout: 5000
-            });
+            await axiosWithRetry(
+                () => axios.post(`${TELEGRAM_API}/sendPhoto`, form, {
+                    headers: form.getHeaders(),
+                    timeout: 5000
+                })
+            );
         } catch (error) {
             if (shouldLogSendError(error)) {
                 console.error(`Error sending notification to user ${userId}:`, error.message);
@@ -132,10 +132,12 @@ router.patch('/deals/:id/complete', authenticateToken, async (req, res) => {
             const referralRevenuePercent = config.referralRevenuePercent / 100;
             const btcPrice = await (async () => {
                 try {
-                    const response = await axios.get('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=rub', { timeout: 5000 });
+                    const response = await axiosWithRetry(
+                        () => axios.get('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=rub', { timeout: 5000 })
+                    );
                     return response.data.bitcoin.rub || 5000000;
                 } catch (error) {
-                    console.error('Error fetching BTC price:', error.message);
+                    console.error('Error fetching BTC price after all retries:', error.message);
                     return 5000000;
                 }
             })();

@@ -1,15 +1,17 @@
 const express = require('express');
-const { loadJson, saveJson } = require('../utils/storage_utils');
+const { 
+    loadJson, 
+    saveJson,
+    getCompletedDealsByUserId,
+    getWithdrawalsByUserId
+} = require('../utils/storage_utils');
 const { authenticateToken, restrictTo } = require('../middleware/auth_middleware');
 
 const router = express.Router();
 
 router.get('/users', authenticateToken, (req, res) => {
     try {
-        let users = loadJson('users');
-        if (!Array.isArray(users)) {
-            users = Object.values(users);
-        }
+        const users = loadJson('users');
         
         const { search, page = 1, perPage = 50, registrationDate, dealsCount, turnover, activity } = req.query;
         const pageNum = parseInt(page, 10) || 1;
@@ -21,58 +23,48 @@ router.get('/users', authenticateToken, (req, res) => {
         const turnoverFilter = turnover ? parseFloat(turnover) : null;
         const activityFilter = activity || null;
         
-        let deals = loadJson('deals');
-        if (!Array.isArray(deals)) {
-            deals = Object.values(deals);
-        }
-        
-        let withdrawals = loadJson('withdrawals');
-        if (!Array.isArray(withdrawals)) {
-            withdrawals = Object.values(withdrawals);
-        }
-        
-        let filtered = users.map(u => {
-            const userDeals = deals.filter(d => 
-                (d.userId === u.id || String(d.userId) === String(u.id)) &&
-                d.status === 'completed' &&
-                (d.rubAmount || d.amount)
-            );
-            const userWithdrawals = withdrawals.filter(w => w.userId === u.id && w.status === 'completed');
-            const userDealsCount = userDeals.length;
-            const userTurnover = userDeals.reduce((sum, d) => sum + (d.rubAmount || d.amount || 0), 0);
-            
-            const latestActivity = [...userDeals, ...userWithdrawals]
-                .map(item => new Date(item.timestamp))
-                .sort((a, b) => b - a)[0];
-            const lastActivityDate = latestActivity ? latestActivity.toISOString().split('T')[0] : null;
-            
-            return {
-                ...u,
-                _stats: {
-                    dealsCount: userDealsCount,
-                    turnover: userTurnover,
-                    lastActivityDate,
-                    userDeals
+        const filtered = users
+            .map(u => {
+                const userDeals = getCompletedDealsByUserId(u.id);
+                const userWithdrawals = getWithdrawalsByUserId(u.id).filter(w => w.status === 'completed');
+                const userDealsCount = userDeals.length;
+                const userTurnover = userDeals.reduce((sum, d) => sum + (d.rubAmount || d.amount || 0), 0);
+                
+                let latestActivity = null;
+                if (userDeals.length > 0 || userWithdrawals.length > 0) {
+                    const allActivities = [...userDeals, ...userWithdrawals]
+                        .map(item => new Date(item.timestamp).getTime())
+                        .sort((a, b) => b - a);
+                    latestActivity = allActivities[0] ? new Date(allActivities[0]).toISOString().split('T')[0] : null;
                 }
-            };
-        }).filter(u => {
-            const matchesSearch = term ? (
-                u.id.toString().includes(term) ||
-                (u.username && u.username.toLowerCase().includes(term))
-            ) : true;
-            
-            const matchesRegDate = regDateFilter ? (
-                u.registrationDate && u.registrationDate.split('T')[0] === regDateFilter
-            ) : true;
-            
-            const matchesDealsCount = dealsCountFilter !== null ? u._stats.dealsCount >= dealsCountFilter : true;
-            const matchesTurnover = turnoverFilter !== null ? u._stats.turnover >= turnoverFilter : true;
-            const matchesActivity = activityFilter ? (
-                u._stats.lastActivityDate && u._stats.lastActivityDate >= activityFilter
-            ) : true;
-            
-            return matchesSearch && matchesRegDate && matchesDealsCount && matchesTurnover && matchesActivity;
-        });
+                
+                return {
+                    ...u,
+                    _stats: {
+                        dealsCount: userDealsCount,
+                        turnover: userTurnover,
+                        lastActivityDate: latestActivity
+                    }
+                };
+            })
+            .filter(u => {
+                if (term && !u.id.toString().includes(term) && !(u.username && u.username.toLowerCase().includes(term))) {
+                    return false;
+                }
+                if (regDateFilter && (!u.registrationDate || u.registrationDate.split('T')[0] !== regDateFilter)) {
+                    return false;
+                }
+                if (dealsCountFilter !== null && u._stats.dealsCount < dealsCountFilter) {
+                    return false;
+                }
+                if (turnoverFilter !== null && u._stats.turnover < turnoverFilter) {
+                    return false;
+                }
+                if (activityFilter && (!u._stats.lastActivityDate || u._stats.lastActivityDate < activityFilter)) {
+                    return false;
+                }
+                return true;
+            });
         
         filtered.sort((a, b) => {
             const timeA = new Date(a.registrationDate || 0).getTime();
@@ -85,6 +77,10 @@ router.get('/users', authenticateToken, (req, res) => {
         const startIndex = (pageNum - 1) * perPageNum;
         const endIndex = startIndex + perPageNum;
         const paginatedData = filtered.slice(startIndex, endIndex);
+        
+        paginatedData.forEach(u => {
+            delete u._stats;
+        });
         
         res.json({
             data: paginatedData,

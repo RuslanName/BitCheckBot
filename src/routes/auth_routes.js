@@ -16,7 +16,7 @@ router.post('/login', (req, res) => {
     if (!login || !password) {
         return res.status(400).json({ error: 'Логин и пароль обязательны' });
     }
-    const config = loadJson('config');
+    const config = loadJson('config') || {};
 
     if (config.multipleOperatorsMode === false) {
         if (login === config.adminLogin && password === config.adminPassword) {

@@ -15,13 +15,16 @@ api.interceptors.request.use(
 
 function formatDateTime(isoDate, nullValue = '-') {
     if (!isoDate) return nullValue;
-    const date = new Date(isoDate);
-    return date.toLocaleString('ru-RU', {
+    const utcDate = new Date(isoDate);
+    const mskOffset = 3 * 60 * 60 * 1000;
+    const mskDate = new Date(utcDate.getTime() + mskOffset);
+    return mskDate.toLocaleString('ru-RU', {
         day: '2-digit',
         month: '2-digit',
         year: 'numeric',
         hour: '2-digit',
-        minute: '2-digit'
+        minute: '2-digit',
+        timeZone: 'Europe/Moscow'
     }).replace(',', '');
 }
 

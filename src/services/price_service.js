@@ -1,5 +1,6 @@
 const axios = require('axios');
 const { COIN_PRICE_API_URL, CACHE_DURATION } = require('../config/constants');
+const { axiosWithRetry } = require('../utils/retry_utils');
 
 let cachedBtcRubPrice = 8200000;
 let cachedLtcRubPrice = 6800;
@@ -12,24 +13,14 @@ async function updatePrices() {
     }
 
     try {
-        const response = await axios.get(`${COIN_PRICE_API_URL}/api/v3/simple/price?ids=bitcoin,litecoin&vs_currencies=rub`, { timeout: 10000 });
+        const response = await axiosWithRetry(
+            () => axios.get(`${COIN_PRICE_API_URL}/api/v3/simple/price?ids=bitcoin,litecoin&vs_currencies=rub`, { timeout: 10000 })
+        );
         cachedBtcRubPrice = response.data.bitcoin.rub || cachedBtcRubPrice;
         cachedLtcRubPrice = response.data.litecoin.rub || cachedLtcRubPrice;
         lastPriceUpdate = now;
     } catch (error) {
-        console.error('Failed to update prices:', error.message);
-        
-        if (error.response && error.response.status === 429) {
-            await new Promise(resolve => setTimeout(resolve, 5000));
-            try {
-                const retryResponse = await axios.get(`${COIN_PRICE_API_URL}/api/v3/simple/price?ids=bitcoin,litecoin&vs_currencies=rub`, { timeout: 10000 });
-                cachedBtcRubPrice = retryResponse.data.bitcoin.rub || cachedBtcRubPrice;
-                cachedLtcRubPrice = retryResponse.data.litecoin.rub || cachedLtcRubPrice;
-                lastPriceUpdate = now;
-            } catch (retryError) {
-                console.error('Failed to update prices after retry:', retryError.message);
-            }
-        }
+        console.error('Failed to update prices after all retries:', error.message);
     }
 }
 

@@ -3,10 +3,10 @@ const axios = require('axios');
 const FormData = require('form-data');
 const path = require('path');
 const fs = require('fs-extra');
-const { loadJson, saveJson } = require('../utils/storage_utils');
+const { loadJson, saveJson, getUserById } = require('../utils/storage_utils');
 const { authenticateToken, restrictTo } = require('../middleware/auth_middleware');
 const { TELEGRAM_API, DATA_PATH } = require('../config/constants');
-const { shouldLogSendError } = require('../utils');
+const { shouldLogSendError, axiosWithRetry } = require('../utils');
 
 const router = express.Router();
 
@@ -20,15 +20,17 @@ router.get('/withdrawals', authenticateToken, restrictTo('mainAdmin'), async (re
         const { search } = req.query;
         const term = search ? search.trim().toLowerCase() : '';
 
-        const users = loadJson('users');
         data = data.filter(w => {
             if (!w || w.status === 'draft') return false;
-            const user = users.find(u => u.id === w.userId) || {};
-            return (
-                (w.id && w.id.toString().includes(term)) ||
-                (w.userId && w.userId.toString().includes(term)) ||
-                (user.username && user.username.toLowerCase().includes(term))
-            );
+            if (term) {
+                const user = getUserById(w.userId) || {};
+                return (
+                    (w.id && w.id.toString().includes(term)) ||
+                    (w.userId && w.userId.toString().includes(term)) ||
+                    (user.username && user.username.toLowerCase().includes(term))
+                );
+            }
+            return true;
         });
 
         res.json(data);
@@ -69,10 +71,12 @@ router.patch('/withdrawals/:id/complete', authenticateToken, restrictTo('mainAdm
                     [{ text: '📞 Написать оператору', url: contactUrl }],
                 ]
             }));
-            await axios.post(`${TELEGRAM_API}/sendPhoto`, form, {
-                headers: form.getHeaders(),
-                timeout: 5000
-            });
+            await axiosWithRetry(
+                () => axios.post(`${TELEGRAM_API}/sendPhoto`, form, {
+                    headers: form.getHeaders(),
+                    timeout: 5000
+                })
+            );
         } catch (error) {
             if (shouldLogSendError(error)) {
                 console.error(`Error sending withdrawal notification to user ${userId}:`, error.message);
