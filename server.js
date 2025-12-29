@@ -17,7 +17,7 @@ app.use('/api', apiRouter);
 const broadcastEmitter = new EventEmitter();
 const raffleEmitter = new EventEmitter();
 
-const { authRoutes, configRoutes, userRoutes, dealRoutes, broadcastRoutes, raffleRoutes, withdrawalRoutes } = require('./src/routes');
+const { authRoutes, configRoutes, userRoutes, dealRoutes, broadcastRoutes, raffleRoutes, withdrawalRoutes, analyticsRoutes } = require('./src/routes');
 
 const setupBroadcastRoutes = (router, emitter) => {
     router.use((req, res, next) => {
@@ -42,6 +42,7 @@ apiRouter.use(dealRoutes);
 apiRouter.use(setupBroadcastRoutes(broadcastRoutes, broadcastEmitter));
 apiRouter.use(setupRaffleRoutes(raffleRoutes, raffleEmitter));
 apiRouter.use(withdrawalRoutes);
+apiRouter.use(analyticsRoutes);
 
 function sendHtmlFile(res, filePath) {
     if (fs.existsSync(filePath)) {

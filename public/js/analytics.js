@@ -13,87 +13,90 @@ function initializeAnalytics() {
         const commissionTable = document.querySelector('#commissionAnalyticsTable tbody');
         const usersTable = document.querySelector('#usersAnalyticsTable tbody');
 
-        let deals = [];
-        let users = [];
+        function showLoading() {
+            const periods = ['day', 'week', 'month', 'year'];
+            periods.forEach(period => {
+                const periodName = period.charAt(0).toUpperCase() + period.slice(1);
+                const countEl = document.getElementById(`deals${periodName}Count`);
+                const amountEl = document.getElementById(`deals${periodName}Amount`);
+                const commissionEl = document.getElementById(`commission${periodName}`);
+                const usersEl = document.getElementById(`users${periodName}`);
+                
+                if (countEl) countEl.textContent = '...';
+                if (amountEl) amountEl.textContent = '...';
+                if (commissionEl) commissionEl.textContent = '...';
+                if (usersEl) usersEl.textContent = '...';
+            });
+        }
 
-        async function loadAllData() {
+        async function loadAnalytics() {
+            showLoading();
             try {
-                const [dealRes, userRes] = await Promise.all([
-                    api.get('/deals/analytics'),
-                    api.get('/users/analytics')
-                ]);
+                const response = await api.get('/analytics/stats', { timeout: 30000 });
+                const stats = response.data;
+                console.log('Analytics stats received:', stats);
                 
-                deals = Array.isArray(dealRes.data) ? dealRes.data : [];
-                users = Array.isArray(userRes.data) ? userRes.data : [];
+                if (!stats || !stats.deals || !stats.commission || !stats.users) {
+                    console.error('Invalid stats format:', stats);
+                    throw new Error('Неверный формат данных');
+                }
                 
-                renderAnalytics();
+                renderAnalytics(stats);
             } catch (err) {
                 console.error('Error loading analytics data:', err);
                 if (err.response?.status === 401 || err.response?.status === 403) {
                     localStorage.removeItem('token');
                     window.location.href = '/login';
+                } else if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
+                    const errorMsg = 'Превышено время ожидания. Попробуйте обновить страницу.';
+                    if (dealsTable) dealsTable.innerHTML = `<tr><td colspan="3">${errorMsg}</td></tr>`;
+                    if (commissionTable) commissionTable.innerHTML = `<tr><td colspan="2">${errorMsg}</td></tr>`;
+                    if (usersTable) usersTable.innerHTML = `<tr><td colspan="2">${errorMsg}</td></tr>`;
                 } else {
-                    dealsTable.innerHTML = '<tr><td colspan="3">Ошибка загрузки информации</td></tr>';
-                    commissionTable.innerHTML = '<tr><td colspan="2">Ошибка загрузки информации</td></tr>';
-                    usersTable.innerHTML = '<tr><td colspan="2">Ошибка загрузки информации</td></tr>';
+                    const errorMsg = 'Ошибка загрузки информации';
+                    if (dealsTable) dealsTable.innerHTML = `<tr><td colspan="3">${errorMsg}</td></tr>`;
+                    if (commissionTable) commissionTable.innerHTML = `<tr><td colspan="2">${errorMsg}</td></tr>`;
+                    if (usersTable) usersTable.innerHTML = `<tr><td colspan="2">${errorMsg}</td></tr>`;
                 }
             }
         }
         
-        loadAllData();
+        loadAnalytics();
 
-        function getPeriodFilter(period) {
-            const now = new Date();
-            let startDate = new Date(now);
-            
-            startDate.setHours(0, 0, 0, 0);
-
-            switch (period) {
-                case 'day':
-                    startDate.setDate(now.getDate());
-                    break;
-                case 'week':
-                    startDate.setDate(now.getDate() - 6);
-                    break;
-                case 'month':
-                    startDate.setDate(now.getDate() - 29);
-                    break;
-                case 'year':
-                    startDate.setDate(now.getDate() - 364);
-                    break;
-                default:
-                    startDate = new Date(0);
-            }
-
-            return item => {
-                const itemDate = new Date(item.timestamp);
-                itemDate.setHours(0, 0, 0, 0);
-                return itemDate >= startDate;
-            };
-        }
-
-        function renderAnalytics() {
+        function renderAnalytics(stats) {
             const periods = ['day', 'week', 'month', 'year'];
             periods.forEach(period => {
-                const completedDeals = deals.filter(d => d.status === 'completed' && getPeriodFilter(period)(d));
-                const dealCount = completedDeals.length;
-                const dealAmount = completedDeals.reduce((sum, d) => sum + (d.total || d.rubAmount || 0), 0);
-                document.getElementById(`deals${period.charAt(0).toUpperCase() + period.slice(1)}Count`).textContent = dealCount;
-                document.getElementById(`deals${period.charAt(0).toUpperCase() + period.slice(1)}Amount`).innerHTML = formatNumber(dealAmount, 2);
+                const periodName = period.charAt(0).toUpperCase() + period.slice(1);
+                const periodStats = stats.deals[period] || { count: 0, amount: 0 };
+                
+                const countEl = document.getElementById(`deals${periodName}Count`);
+                const amountEl = document.getElementById(`deals${periodName}Amount`);
+                
+                if (!countEl) console.warn(`Element deals${periodName}Count not found`);
+                if (!amountEl) console.warn(`Element deals${periodName}Amount not found`);
+                
+                if (countEl) countEl.textContent = periodStats.count || 0;
+                if (amountEl) amountEl.innerHTML = formatNumber(periodStats.amount || 0, 2);
             });
 
             periods.forEach(period => {
-                const completedDeals = deals.filter(d => d.status === 'completed' && getPeriodFilter(period)(d));
-                const commissionTotal = completedDeals.reduce((sum, d) => sum + (d.commission || 0), 0);
-                document.getElementById(`commission${period.charAt(0).toUpperCase() + period.slice(1)}`).innerHTML = formatNumber(commissionTotal, 2);
+                const periodName = period.charAt(0).toUpperCase() + period.slice(1);
+                const commissionTotal = stats.commission[period] || 0;
+                const commissionEl = document.getElementById(`commission${periodName}`);
+                
+                if (!commissionEl) console.warn(`Element commission${periodName} not found`);
+                
+                if (commissionEl) commissionEl.innerHTML = formatNumber(commissionTotal, 2);
             });
 
             periods.forEach(period => {
-                const registeredUsers = users.filter(u => {
-                    if (!u.registrationDate) return false;
-                    return getPeriodFilter(period)({ timestamp: u.registrationDate });
-                });
-                document.getElementById(`users${period.charAt(0).toUpperCase() + period.slice(1)}`).textContent = registeredUsers.length;
+                const periodName = period.charAt(0).toUpperCase() + period.slice(1);
+                const usersCount = stats.users[period] || 0;
+                const usersEl = document.getElementById(`users${periodName}`);
+                
+                if (!usersEl) console.warn(`Element users${periodName} not found`);
+                
+                if (usersEl) usersEl.textContent = usersCount;
             });
         }
     });

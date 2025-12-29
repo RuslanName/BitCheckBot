@@ -5,6 +5,7 @@ const dealRoutes = require('./deal_routes');
 const { router: broadcastRoutes, upload } = require('./broadcast_routes');
 const raffleRoutes = require('./raffle_routes');
 const withdrawalRoutes = require('./withdrawal_routes');
+const analyticsRoutes = require('./analytics_routes');
 
 module.exports = {
     authRoutes,
@@ -14,6 +15,7 @@ module.exports = {
     broadcastRoutes,
     upload,
     raffleRoutes,
-    withdrawalRoutes
+    withdrawalRoutes,
+    analyticsRoutes
 };
 

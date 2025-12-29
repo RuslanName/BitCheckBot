@@ -196,7 +196,7 @@ router.get('/deals/analytics', authenticateToken, async (req, res) => {
             data = Object.values(data);
         }
 
-        let filtered = data.filter(d => d && d.status !== 'draft');
+        let filtered = data.filter(d => d && d.status === 'completed');
 
         if (req.user.role === 'admin') {
             filtered = filtered.filter(d => d.currency === req.user.currency);
