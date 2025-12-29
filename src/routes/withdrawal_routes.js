@@ -17,11 +17,24 @@ router.get('/withdrawals', authenticateToken, restrictTo('mainAdmin'), async (re
             data = Object.values(data);
         }
 
-        const { search } = req.query;
+        const { search, page = 1, perPage = 50, status } = req.query;
         const term = search ? search.trim().toLowerCase() : '';
+        const pageNum = parseInt(page, 10) || 1;
+        const perPageNum = parseInt(perPage, 10) || 50;
 
-        data = data.filter(w => {
+        let filtered = data.filter(w => {
             if (!w || w.status === 'draft') return false;
+            
+            if (status) {
+                const statusMap = {
+                    'open': ['pending'],
+                    'completed': ['completed']
+                };
+                if (statusMap[status] && !statusMap[status].includes(w.status)) {
+                    return false;
+                }
+            }
+            
             if (term) {
                 const user = getUserById(w.userId) || {};
                 return (
@@ -33,7 +46,27 @@ router.get('/withdrawals', authenticateToken, restrictTo('mainAdmin'), async (re
             return true;
         });
 
-        res.json(data);
+        filtered.sort((a, b) => {
+            const timeA = new Date(a.timestamp || 0).getTime();
+            const timeB = new Date(b.timestamp || 0).getTime();
+            return timeB - timeA;
+        });
+
+        const total = filtered.length;
+        const totalPages = Math.ceil(total / perPageNum);
+        const startIndex = (pageNum - 1) * perPageNum;
+        const endIndex = startIndex + perPageNum;
+        const paginatedData = filtered.slice(startIndex, endIndex);
+
+        res.json({
+            data: paginatedData,
+            pagination: {
+                page: pageNum,
+                perPage: perPageNum,
+                total,
+                totalPages
+            }
+        });
     } catch (err) {
         console.error('Error fetching withdrawals:', err.message);
         res.status(500).json({ error: 'Внутренняя ошибка сервера' });

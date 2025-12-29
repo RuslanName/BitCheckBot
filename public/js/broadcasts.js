@@ -44,8 +44,13 @@ function initializeBroadcasts() {
             if (broadcast.scheduledTime) {
                 const utcDate = new Date(broadcast.scheduledTime);
                 const mskOffset = 3 * 60 * 60 * 1000;
-                const mskDate = new Date(utcDate.getTime() + mskOffset);
-                scheduledTime = mskDate.toISOString().slice(0, 16);
+                const mskTime = new Date(utcDate.getTime() + mskOffset);
+                const year = mskTime.getUTCFullYear();
+                const month = String(mskTime.getUTCMonth() + 1).padStart(2, '0');
+                const day = String(mskTime.getUTCDate()).padStart(2, '0');
+                const hours = String(mskTime.getUTCHours()).padStart(2, '0');
+                const minutes = String(mskTime.getUTCMinutes()).padStart(2, '0');
+                scheduledTime = `${year}-${month}-${day}T${hours}:${minutes}`;
             }
             modal.innerHTML = `
                 <div class="modal-content">
@@ -95,9 +100,11 @@ function initializeBroadcasts() {
                 const formData = new FormData();
                 formData.append('content', content);
                 if (scheduledTimeInput) {
-                    const mskDate = new Date(scheduledTimeInput);
+                    const [datePart, timePart] = scheduledTimeInput.split('T');
+                    const [year, month, day] = datePart.split('-').map(Number);
+                    const [hours, minutes] = timePart.split(':').map(Number);
                     const mskOffset = 3 * 60 * 60 * 1000;
-                    const utcDate = new Date(mskDate.getTime() - mskOffset);
+                    const utcDate = new Date(Date.UTC(year, month - 1, day, hours, minutes) - mskOffset);
                     formData.append('scheduledTime', utcDate.toISOString());
                 } else {
                     formData.append('scheduledTime', '');
@@ -224,9 +231,11 @@ function initializeBroadcasts() {
                 const formData = new FormData();
                 formData.append('content', content);
                 if (scheduledTimeInput) {
-                    const mskDate = new Date(scheduledTimeInput);
+                    const [datePart, timePart] = scheduledTimeInput.split('T');
+                    const [year, month, day] = datePart.split('-').map(Number);
+                    const [hours, minutes] = timePart.split(':').map(Number);
                     const mskOffset = 3 * 60 * 60 * 1000;
-                    const utcDate = new Date(mskDate.getTime() - mskOffset);
+                    const utcDate = new Date(Date.UTC(year, month - 1, day, hours, minutes) - mskOffset);
                     formData.append('scheduledTime', utcDate.toISOString());
                 } else {
                     formData.append('scheduledTime', '');

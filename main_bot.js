@@ -655,7 +655,7 @@ async function processRaffleEnd(raffle) {
         return;
     }
 
-    const config = loadJson('config');
+    const config = loadJson('config') || {};
     const operators = config.multipleOperatorsData || [];
     const operatorUsernames = operators.map(op => op.username);
     const operatorIds = users.filter(u => operatorUsernames.includes(u.username)).map(u => u.id);
@@ -743,7 +743,7 @@ const rateLimit = RateLimit({
 });
 
 main_bot.use(async (ctx, next) => {
-    const config = loadJson('config');
+    const config = loadJson('config') || {};
     if (config.botStatus === false) {
         await sendBitCheckPhoto(ctx.chat.id, {
             caption: '🚫 Бот временно отключен. Пожалуйста, попробуйте позже.'
@@ -769,7 +769,7 @@ main_bot.use(async (ctx, next) => {
             saveJson('states', states);
 
             if (ctx.message.text !== '/start') {
-                const users = loadJson('users');
+                const users = loadJson('users') || [];
                 const userId = ctx.from.id;
                 const user = users.find(u => u.id === userId);
                 if (!user) {
@@ -786,8 +786,8 @@ main_bot.use(async (ctx, next) => {
 });
 
 main_bot.command('start', async ctx => {
-    const users = loadJson('users');
-    const states = loadStates('states');
+    const users = loadJson('users') || [];
+    const states = loadStates() || {};
     const userId = ctx.from.id;
     if (!ctx.message || !ctx.message.text) {
         return;
@@ -852,7 +852,7 @@ main_bot.command('start', async ctx => {
 });
 
 main_bot.hears('👤 Профиль', async ctx => {
-    const users = loadJson('users');
+    const users = loadJson('users') || [];
     const userId = ctx.from.id;
     const user = users.find(u => u.id === userId);
     if (!user) {
@@ -886,8 +886,8 @@ main_bot.hears('💬 Чат', async ctx => {
 });
 
 main_bot.hears('🤝 Партнёрство', async ctx => {
-    const users = loadJson('users');
-    const states = loadJson('states');
+    const users = loadJson('users') || [];
+    const states = loadJson('states') || {};
     const userId = ctx.from.id;
     const user = users.find(u => u.id === userId);
     if (!user) {
@@ -909,8 +909,8 @@ main_bot.hears('🤝 Партнёрство', async ctx => {
 });
 
 main_bot.hears('💰 Купить', async ctx => {
-    const config = loadJson('config');
-    const states = loadStates();
+    const config = loadJson('config') || {};
+    const states = loadStates() || {};
     if (!config.minBuyAmountRubBTC || !config.maxBuyAmountRubBTC || !config.minBuyAmountRubLTC || !config.maxBuyAmountRubLTC) {
         await sendBitCheckPhoto(ctx.chat.id, {
             caption: MESSAGES.ERROR_CONFIG
@@ -933,8 +933,8 @@ main_bot.hears('💰 Купить', async ctx => {
 });
 
 main_bot.hears('💸 Продать', async ctx => {
-    const config = loadJson('config');
-    const states = loadStates();
+    const config = loadJson('config') || {};
+    const states = loadStates() || {};
     if (!config.minSellAmountRubBTC || !config.maxSellAmountRubBTC || !config.minSellAmountRubLTC || !config.maxSellAmountRubLTC) {
         await sendBitCheckPhoto(ctx.chat.id, {
             caption: MESSAGES.ERROR_CONFIG
@@ -957,7 +957,7 @@ main_bot.hears('💸 Продать', async ctx => {
 });
 
 main_bot.hears('🆘 Поддержка', async ctx => {
-    const states = loadJson('states');
+    const states = loadJson('states') || {};
     const message = await sendBitCheckPhoto(ctx.chat.id, {
         caption: '🆘 Напишите нам!',
         reply_markup: {
@@ -973,9 +973,9 @@ main_bot.hears('🆘 Поддержка', async ctx => {
 
 main_bot.on('message', async ctx => {
     try {
-        const config = loadJson('config');
-        const users = loadJson('users');
-        const states = loadStates();
+        const config = loadJson('config') || {};
+        const users = loadJson('users') || [];
+        const states = loadStates() || {};
         const id = ctx.from.id;
         const user = users.find(u => u.id === id);
         if (user && user.isBlocked) return;
@@ -1201,7 +1201,7 @@ main_bot.on('message', async ctx => {
         if (states.pendingTransactionHash[ctx.from.id]) {
             const transactionHash = ctx.message.text;
             const dealId = states.pendingTransactionHash[ctx.from.id].dealId;
-            const deals = loadJson('deals');
+            const deals = loadJson('deals') || [];
             const dealIndex = deals.findIndex(d => d.id === dealId);
             if (dealIndex === -1) {
                 await ctx.reply(MESSAGES.ERROR_DEAL_NOT_FOUND_OR_PROCESSED);
@@ -1522,14 +1522,14 @@ main_bot.on('message', async ctx => {
             const inputValue = parseFloat(input);
             let amount, rubAmount;
 
-            const users = loadJson('users');
+            const users = loadJson('users') || [];
             const user = users.find(u => u.id === id);
             if (!user) {
                 console.error(`User not found: ${id}`);
                 return;
             }
             const earningsRub = (user.balance || 0) * priceBTC;
-            const config = loadJson('config');
+            const config = loadJson('config') || {};
             const minWithdrawRub = config.minWithdrawAmountRub;
 
             if (isNaN(inputValue) || inputValue <= 0) {
@@ -1646,8 +1646,8 @@ main_bot.on('callback_query', async ctx => {
             return;
         }
 
-        const deals = loadJson('deals');
-        const withdrawals = loadJson('withdrawals');
+        const deals = loadJson('deals') || [];
+        const withdrawals = loadJson('withdrawals') || [];
 
         if (data.startsWith('view_raffle_results_')) {
             const parts = data.split('_');
@@ -1695,7 +1695,7 @@ main_bot.on('callback_query', async ctx => {
             }
 
             const walletType = states.pendingDeal[from].walletType;
-            const users = loadJson('users');
+            const users = loadJson('users') || [];
             const user = users.find(u => u.id === from);
             if (!user) {
                 console.error(`User not found: ${from}`);
@@ -1716,7 +1716,7 @@ main_bot.on('callback_query', async ctx => {
 
             states.pendingDeal[from].wallet = wallet;
             const isSell = walletType === 'defaultRequisites';
-            const config = loadJson('config');
+            const config = loadJson('config') || {};
             const message = await sendBitCheckPhoto(ctx.chat.id, {
                 caption: `💎 Хотите ли вы, чтобы ваша сделка стала выше в очереди? (Цена ${config.priorityPriceRub} RUB)`,
                 reply_markup: {
@@ -1786,7 +1786,7 @@ main_bot.on('callback_query', async ctx => {
             const isSell = walletType === 'defaultRequisites';
 
             if (isYes) {
-                const users = loadJson('users');
+                const users = loadJson('users') || [];
                 const user = users.find(u => u.id === from);
                 if (!user) {
                     console.error(`User not found: ${from}`);
@@ -1804,7 +1804,7 @@ main_bot.on('callback_query', async ctx => {
                 console.error(`Error deleting message ${states.pendingDeal[from].messageId}:`, error.message);
             });
 
-            const config = loadJson('config');
+            const config = loadJson('config') || {};
             const message = await sendBitCheckPhoto(ctx.chat.id, {
                 caption: `💎 Хотите ли вы, чтобы ваша сделка стала выше в очереди? (Цена ${config.priorityPriceRub} RUB)`,
                 reply_markup: {
@@ -1841,8 +1841,8 @@ main_bot.on('callback_query', async ctx => {
         }
 
         if (data === 'update_buy_btc' || data === 'update_buy_ltc' || data === 'update_sell') {
-            const states = loadStates();
-            const users = loadJson('users');
+            const states = loadStates() || {};
+            const users = loadJson('users') || [];
             const user = users.find(u => u.id === from);
             if (!user) {
                 console.error(`User not found: ${from}`);
@@ -1891,7 +1891,7 @@ main_bot.on('callback_query', async ctx => {
                 return;
             }
 
-            const users = loadJson('users');
+            const users = loadJson('users') || [];
             const user = users.find(u => u.id === from);
             if (!user) {
                 console.error(`User not found: ${from}`);
@@ -2272,9 +2272,9 @@ main_bot.on('callback_query', async ctx => {
 
         if (data === 'withdraw_referral') {
             const states = loadStates();
-            const users = loadJson('users');
+            const users = loadJson('users') || [];
             const user = users.find(u => u.id === from);
-            const config = loadJson('config');
+            const config = loadJson('config') || {};
             if (!user || !user.balance) {
                 await ctx.answerCbQuery(MESSAGES.ERROR_NO_FUNDS, { show_alert: false });
                 saveJson('states', states);
@@ -2333,7 +2333,7 @@ main_bot.on('callback_query', async ctx => {
             states.pendingDeal[from] = states.pendingDeal[from] || {};
             states.pendingDeal[from].currency = currency;
 
-            const config = loadJson('config');
+            const config = loadJson('config') || {};
             const minAmountRub = isProcessingEnabled() ? 1000 : (currency === 'BTC' ? config.minBuyAmountRubBTC : config.minBuyAmountRubLTC);
             const maxAmountRub = currency === 'BTC' ? config.maxBuyAmountRubBTC : config.maxBuyAmountRubLTC;
             const price = currency === 'BTC' ? await getBtcRubPrice() : await getLtcRubPrice();
@@ -2364,7 +2364,7 @@ main_bot.on('callback_query', async ctx => {
             states.pendingDeal[from] = states.pendingDeal[from] || {};
             states.pendingDeal[from].currency = currency;
 
-            const config = loadJson('config');
+            const config = loadJson('config') || {};
             const minAmountRub = currency === 'BTC' ? config.minSellAmountRubBTC : config.minSellAmountRubLTC;
             const maxAmountRub = currency === 'BTC' ? config.maxSellAmountRubBTC : config.maxSellAmountRubLTC;
             const price = currency === 'BTC' ? await getBtcRubPrice() : await getLtcRubPrice();
@@ -2432,9 +2432,9 @@ main_bot.on('callback_query', async ctx => {
                 return;
             }
 
-            const config = loadJson('config');
-            const users = loadJson('users');
-            const deals = loadJson('deals');
+            const config = loadJson('config') || {};
+            const users = loadJson('users') || [];
+            const deals = loadJson('deals') || [];
             const user = users.find(u => u.id === from);
             if (user && user.isBlocked) return;
 
@@ -2704,7 +2704,7 @@ main_bot.on('callback_query', async ctx => {
                 return;
             }
             
-            const config = loadJson('config');
+            const config = loadJson('config') || {};
             const discount = await getCommissionDiscount(from);
             const priorityPrice = deal.priority === 'elevated' ? config.priorityPriceRub : 0;
             const paymentTarget = deal.type === 'buy' ? 'Кошелёк' : 'Реквизиты';
@@ -2735,10 +2735,10 @@ main_bot.on('callback_query', async ctx => {
         }
 
         if (data === 'select_bitcheck-requisites') {
-            const states = loadJson('states');
+            const states = loadJson('states') || {};
             const dealData = states.pendingDeal[from];
             const deal = deals.find(d => d.id === dealData.dealId);
-            const config = loadJson('config');
+            const config = loadJson('config') || {};
             const discount = await getCommissionDiscount(from);
             const priorityPrice = deal.priority === 'elevated' ? config.priorityPriceRub : 0;
             const paymentTarget = deal.type === 'buy' ? 'Кошелёк' : 'Реквизиты';
@@ -2788,9 +2788,9 @@ main_bot.on('callback_query', async ctx => {
             deal.status = deal.type === 'buy' ? 'unpaid' : 'pending';
             deals[dealIndex] = deal;
 
-            const users = loadJson('users');
+            const users = loadJson('users') || [];
             const user = users.find(u => u.id === deal.userId);
-            const config = loadJson('config');
+            const config = loadJson('config') || {};
             const paymentTarget = deal.type === 'buy' ? 'Кошелёк' : 'Реквизиты';
             const operatorContactUrl = getOperatorContactUrl(deal.currency);
             const discount = await getCommissionDiscount(deal.userId);
@@ -2938,9 +2938,9 @@ main_bot.on('callback_query', async ctx => {
                 return;
             }
             const deal = deals[dealIndex];
-            const users = loadJson('users');
+            const users = loadJson('users') || [];
             const user = users.find(u => u.id === deal.userId);
-            const config = loadJson('config');
+            const config = loadJson('config') || {};
             const operatorContactUrl = getOperatorContactUrl(deal.currency);
             const discount = await getCommissionDiscount(deal.userId);
             const priorityPrice = deal.priority === 'elevated' ? config.priorityPriceRub : 0;
@@ -3170,7 +3170,7 @@ main_bot.on('callback_query', async ctx => {
 
                 if (deal.processingStatus && deal.selectedPaymentDetailsId) {
                     try {
-                        const config = loadJson('config');
+                        const config = loadJson('config') || {};
                         const cancelId = (config.processingType === 'settlex_processing' && deal.paymentInternalId) 
                             ? deal.paymentInternalId 
                             : deal.selectedPaymentDetailsId;
@@ -3258,9 +3258,9 @@ main_bot.on('callback_query', async ctx => {
                 deals[dealIndex] = { ...deal, status: 'completed' };
                 saveJson('deals', deals);
 
-                const users = loadJson('users');
+                const users = loadJson('users') || [];
                 const user = users.find(u => u.id === deal.userId);
-                const config = loadJson('config');
+                const config = loadJson('config') || {};
                 const actionText = deal.type === 'buy' ? 'Покупка' : 'Продажа';
                 const priorityPrice = deal.priority === 'elevated' ? config.priorityPriceRub : 0;
                 const caption = `✅ Сделка №${deal.id} завершена!\n` +

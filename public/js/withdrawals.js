@@ -37,50 +37,74 @@ function initializeWithdrawals() {
         let withdrawals = [];
         let users = [];
         let page = 1;
-        let perPage = parseInt(perPageSelect.value) || 25;
-        let showCompleted = false;
+        let perPage = parseInt(perPageSelect.value) || 50;
+        let activeTab = 'open';
         let selectedWithdrawals = new Set();
         let lastSelectedWithdrawalId = null;
+        let paginationInfo = { total: 0, totalPages: 0 };
 
-        Promise.all([
-            api.get('/withdrawals'),
-            api.get('/users')
-        ]).then(([withdrawalRes, userRes]) => {
-            withdrawals = Array.isArray(withdrawalRes.data) ? withdrawalRes.data : Object.values(withdrawalRes.data);
-            users = Array.isArray(userRes.data) ? userRes.data : [];
-            renderWithdrawalsTable();
-        }).catch(err => {
-            console.error('Ошибка загрузки данных:', err);
-            if (err.response?.status === 401 || err.response?.status === 403) {
-                localStorage.removeItem('token');
-                window.location.href = '/login';
-            } else {
-                tbody.innerHTML = '<tr><td colspan="7">Ошибка загрузки информации</td></tr>';
+        function loadWithdrawals() {
+            const params = {
+                page,
+                perPage,
+                status: activeTab
+            };
+            const search = searchInput.value.trim();
+            if (search) {
+                params.search = search;
             }
-        });
 
+            tbody.innerHTML = '<tr><td colspan="7">Загрузка...</td></tr>';
+
+            Promise.all([
+                api.get('/withdrawals', { params }),
+                api.get('/users')
+            ]).then(([withdrawalRes, userRes]) => {
+                const response = withdrawalRes.data;
+                withdrawals = response.data || [];
+                paginationInfo = response.pagination || { total: 0, totalPages: 0, page: 1, perPage: 50 };
+                users = Array.isArray(userRes.data) ? userRes.data : [];
+                page = paginationInfo.page || page;
+                renderWithdrawalsTable();
+            }).catch(err => {
+                console.error('Ошибка загрузки данных:', err);
+                if (err.response?.status === 401 || err.response?.status === 403) {
+                    localStorage.removeItem('token');
+                    window.location.href = '/login';
+                } else {
+                    tbody.innerHTML = '<tr><td colspan="7">Ошибка загрузки информации</td></tr>';
+                }
+            });
+        }
+
+        loadWithdrawals();
+
+        let searchTimeout;
         searchInput.addEventListener('input', () => {
-            page = 1;
-            renderWithdrawalsTable();
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(() => {
+                page = 1;
+                loadWithdrawals();
+            }, 300);
         });
 
         perPageSelect.addEventListener('change', (e) => {
-            perPage = parseInt(e.target.value) || 25;
+            perPage = parseInt(e.target.value) || 50;
             page = 1;
-            renderWithdrawalsTable();
+            loadWithdrawals();
         });
 
         prevBtn.onclick = () => {
             if (page > 1) {
                 page--;
-                renderWithdrawalsTable();
+                loadWithdrawals();
             }
         };
 
         nextBtn.onclick = () => {
-            if (page < Math.ceil(filterWithdrawals().length / perPage)) {
+            if (page < paginationInfo.totalPages) {
                 page++;
-                renderWithdrawalsTable();
+                loadWithdrawals();
             }
         };
 
@@ -88,9 +112,9 @@ function initializeWithdrawals() {
             button.addEventListener('click', () => {
                 tabContainer.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
                 button.classList.add('active');
-                showCompleted = button.dataset.status === 'completed';
+                activeTab = button.dataset.status;
                 page = 1;
-                renderWithdrawalsTable();
+                loadWithdrawals();
             });
         });
 
@@ -99,9 +123,8 @@ function initializeWithdrawals() {
                 await Promise.all([...selectedWithdrawals].map(withdrawalId =>
                     api.patch(`/withdrawals/${withdrawalId}/complete`)
                 ));
-                withdrawals = withdrawals.map(w => selectedWithdrawals.has(w.id) ? { ...w, status: 'completed' } : w);
                 selectedWithdrawals.clear();
-                renderWithdrawalsTable();
+                loadWithdrawals();
             } catch (err) {
                 console.error('Error completing selected withdrawals:', err);
                 if (err.response?.status === 401 || err.response?.status === 403) {
@@ -116,32 +139,20 @@ function initializeWithdrawals() {
         bulkActionContainer.querySelector('#cancelSelection').onclick = () => {
             selectedWithdrawals.clear();
             lastSelectedWithdrawalId = null;
-            renderWithdrawalsTable();
+            loadWithdrawals();
         };
 
-        function filterWithdrawals() {
-            const term = searchInput.value.trim().toLowerCase();
-            return withdrawals.filter(w => {
-                const user = users.find(u => u.id === w.userId);
-                const username = user ? user.username : w.userId;
-                return (username.toLowerCase().includes(term) || w.id.includes(term)) &&
-                    w.status === (showCompleted ? 'completed' : 'pending');
-            });
-        }
-
         function renderWithdrawalsTable() {
-            const list = filterWithdrawals();
-            const total = list.length;
-            const start = (page - 1) * perPage;
-            const slice = list.slice(start, start + perPage);
+            const list = withdrawals;
+            const total = paginationInfo.total || list.length;
 
             tbody.innerHTML = '';
-            if (total === 0) {
+            if (total === 0 || list.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="7">На данный момент информация отсутствует</td></tr>';
                 return;
             }
 
-            slice.forEach(w => {
+            list.forEach(w => {
                 const buttonId = w.id;
                 const user = users.find(u => u.id === w.userId);
                 const username = user ? user.username : w.userId;
@@ -166,9 +177,9 @@ function initializeWithdrawals() {
                 tbody.appendChild(tr);
             });
 
-            pageInfo.textContent = `Страница ${page} из ${Math.ceil(total / perPage) || 1}`;
-            prevBtn.disabled = page === 1;
-            nextBtn.disabled = page >= Math.ceil(total / perPage);
+            pageInfo.textContent = `Страница ${paginationInfo.page || page} из ${paginationInfo.totalPages || 1}`;
+            prevBtn.disabled = (paginationInfo.page || page) === 1;
+            nextBtn.disabled = (paginationInfo.page || page) >= (paginationInfo.totalPages || 1);
 
             bulkActionContainer.style.display = selectedWithdrawals.size > 0 ? 'flex' : 'none';
 
@@ -229,9 +240,8 @@ function initializeWithdrawals() {
                 btn.onclick = () => {
                     const withdrawalId = btn.dataset.id;
                     api.patch(`/withdrawals/${withdrawalId}/complete`).then(() => {
-                        withdrawals = withdrawals.map(w => w.id === withdrawalId ? { ...w, status: 'completed' } : w);
                         selectedWithdrawals.delete(withdrawalId);
-                        renderWithdrawalsTable();
+                        loadWithdrawals();
                     }).catch(err => {
                         if (err.response?.status === 401 || err.response?.status === 403) {
                             localStorage.removeItem('token');

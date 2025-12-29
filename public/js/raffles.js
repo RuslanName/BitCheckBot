@@ -64,8 +64,30 @@ function initializeRaffles() {
         function openEditModal(raffle) {
             const modal = document.createElement('div');
             modal.className = 'modal';
-            const startDate = raffle.startDate ? new Date(raffle.startDate).toISOString().slice(0, 16) : '';
-            const endDate = raffle.endDate ? new Date(raffle.endDate).toISOString().slice(0, 16) : '';
+            let startDate = '';
+            let endDate = '';
+            if (raffle.startDate) {
+                const utcDate = new Date(raffle.startDate);
+                const mskOffset = 3 * 60 * 60 * 1000;
+                const mskTime = new Date(utcDate.getTime() + mskOffset);
+                const year = mskTime.getUTCFullYear();
+                const month = String(mskTime.getUTCMonth() + 1).padStart(2, '0');
+                const day = String(mskTime.getUTCDate()).padStart(2, '0');
+                const hours = String(mskTime.getUTCHours()).padStart(2, '0');
+                const minutes = String(mskTime.getUTCMinutes()).padStart(2, '0');
+                startDate = `${year}-${month}-${day}T${hours}:${minutes}`;
+            }
+            if (raffle.endDate) {
+                const utcDate = new Date(raffle.endDate);
+                const mskOffset = 3 * 60 * 60 * 1000;
+                const mskTime = new Date(utcDate.getTime() + mskOffset);
+                const year = mskTime.getUTCFullYear();
+                const month = String(mskTime.getUTCMonth() + 1).padStart(2, '0');
+                const day = String(mskTime.getUTCDate()).padStart(2, '0');
+                const hours = String(mskTime.getUTCHours()).padStart(2, '0');
+                const minutes = String(mskTime.getUTCMinutes()).padStart(2, '0');
+                endDate = `${year}-${month}-${day}T${hours}:${minutes}`;
+            }
             let prizesHtml = raffle.prizes.map((prize, index) => `
                 <div class="array-item prize-item">
                     <input type="text" value="${prize}" placeholder="Приз для ${index + 1} места" required>
@@ -187,9 +209,21 @@ function initializeRaffles() {
                     return;
                 }
 
+                const [startDatePart, startTimePart] = startDate.split('T');
+                const [startYear, startMonth, startDay] = startDatePart.split('-').map(Number);
+                const [startHours, startMinutes] = startTimePart.split(':').map(Number);
+                
+                const [endDatePart, endTimePart] = endDate.split('T');
+                const [endYear, endMonth, endDay] = endDatePart.split('-').map(Number);
+                const [endHours, endMinutes] = endTimePart.split(':').map(Number);
+                
+                const mskOffset = 3 * 60 * 60 * 1000;
+                const utcStartDate = new Date(Date.UTC(startYear, startMonth - 1, startDay, startHours, startMinutes) - mskOffset);
+                const utcEndDate = new Date(Date.UTC(endYear, endMonth - 1, endDay, endHours, endMinutes) - mskOffset);
+                
                 const raffleData = {
-                    startDate: new Date(startDate).toISOString(),
-                    endDate: new Date(endDate).toISOString(),
+                    startDate: utcStartDate.toISOString(),
+                    endDate: utcEndDate.toISOString(),
                     conditionType,
                     dealCount: conditionType === 'dealCount' ? parseInt(dealCount) : null,
                     dealSum: conditionType === 'dealSum' ? parseFloat(dealSum) : null,
@@ -372,9 +406,21 @@ function initializeRaffles() {
                 return;
             }
 
+            const [startDatePart, startTimePart] = startDate.split('T');
+            const [startYear, startMonth, startDay] = startDatePart.split('-').map(Number);
+            const [startHours, startMinutes] = startTimePart.split(':').map(Number);
+            
+            const [endDatePart, endTimePart] = endDate.split('T');
+            const [endYear, endMonth, endDay] = endDatePart.split('-').map(Number);
+            const [endHours, endMinutes] = endTimePart.split(':').map(Number);
+            
+            const mskOffset = 3 * 60 * 60 * 1000;
+            const utcStartDate = new Date(Date.UTC(startYear, startMonth - 1, startDay, startHours, startMinutes) - mskOffset);
+            const utcEndDate = new Date(Date.UTC(endYear, endMonth - 1, endDay, endHours, endMinutes) - mskOffset);
+            
             const raffleData = {
-                startDate: new Date(startDate).toISOString(),
-                endDate: new Date(endDate).toISOString(),
+                startDate: utcStartDate.toISOString(),
+                endDate: utcEndDate.toISOString(),
                 conditionType,
                 dealCount: conditionType === 'dealCount' ? parseInt(dealCount) : null,
                 dealSum: conditionType === 'dealSum' ? parseFloat(dealSum) : null,
