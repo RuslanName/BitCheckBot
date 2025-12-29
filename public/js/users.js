@@ -196,8 +196,8 @@ function initializeUsers() {
             }
 
             pageInfo.textContent = `Страница ${paginationInfo.page || page} из ${paginationInfo.totalPages || 1} (Всего: ${paginationInfo.total || 0})`;
-            prevBtn.disabled = page <= 1;
-            nextBtn.disabled = page >= paginationInfo.totalPages;
+            prevBtn.disabled = (paginationInfo.page || page) <= 1;
+            nextBtn.disabled = (paginationInfo.page || page) >= (paginationInfo.totalPages || 1);
 
             document.querySelectorAll('.delete-user').forEach(b => b.onclick = () => {
                 api.delete(`/users/${b.dataset.id}`).then(() => {

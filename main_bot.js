@@ -488,7 +488,6 @@ async function sendBroadcast(broadcast) {
     delete updatedBroadcast.lastAttemptTime;
 
     if (broadcast.isDaily) {
-        const now = new Date();
         const scheduledDate = new Date(broadcast.scheduledTime);
         const mskOffset = 3 * 60 * 60 * 1000;
         const mskScheduledTimeMs = scheduledDate.getTime() + mskOffset;
@@ -496,14 +495,16 @@ async function sendBroadcast(broadcast) {
         const mskHours = mskScheduledTime.getUTCHours();
         const mskMinutes = mskScheduledTime.getUTCMinutes();
         
-        const nextDayMs = new Date(
-            now.getFullYear(),
-            now.getMonth(),
-            now.getDate() + 1,
-            mskHours,
-            mskMinutes
-        ).getTime();
-        const nextDayUTC = new Date(nextDayMs - mskOffset);
+        const now = new Date();
+        const nowMskMs = now.getTime() + mskOffset;
+        const nowMsk = new Date(nowMskMs);
+        const mskYear = nowMsk.getUTCFullYear();
+        const mskMonth = nowMsk.getUTCMonth();
+        const mskDay = nowMsk.getUTCDate();
+        
+        const nextDayMskMs = Date.UTC(mskYear, mskMonth, mskDay + 1, mskHours, mskMinutes, 0, 0);
+        const nextDayUTC = new Date(nextDayMskMs - mskOffset);
+        console.log(`Broadcast ${broadcast.id} next day: current UTC=${now.toISOString()}, scheduled MSK=${mskHours}:${mskMinutes.toString().padStart(2, '0')}, next day UTC=${nextDayUTC.toISOString()}`);
         updatedBroadcast.scheduledTime = nextDayUTC.toISOString();
         updatedBroadcast.status = 'pending';
     } else {

@@ -149,6 +149,9 @@ function initializeWithdrawals() {
             tbody.innerHTML = '';
             if (total === 0 || list.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="7">На данный момент информация отсутствует</td></tr>';
+                pageInfo.textContent = 'Страница 1 из 1';
+                prevBtn.disabled = true;
+                nextBtn.disabled = true;
                 return;
             }
 

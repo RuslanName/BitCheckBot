@@ -21,10 +21,24 @@ function initializeBroadcasts() {
         let broadcasts = [];
         let page = 1;
         let perPage = parseInt(perPageSelect.value) || 50;
+        let paginationInfo = { total: 0, totalPages: 0, page: 1, perPage: 50 };
 
         function loadBroadcasts() {
-            api.get('/broadcasts').then(r => {
-                broadcasts = r.data;
+            const params = {
+                page,
+                perPage
+            };
+            const search = searchInput.value.trim();
+            if (search) {
+                params.search = search;
+            }
+
+            tbody.innerHTML = '<tr><td colspan="6">Загрузка...</td></tr>';
+
+            api.get('/broadcasts', { params }).then(r => {
+                const response = r.data;
+                broadcasts = response.data || [];
+                paginationInfo = response.pagination || { total: 0, totalPages: 0, page: 1, perPage: 50 };
                 renderBroadcastsTable();
             }).catch(err => {
                 console.error('Error loading broadcasts:', err);
@@ -77,6 +91,7 @@ function initializeBroadcasts() {
                             <span class="toggle-label">Ежедневная рассылка</span>
                         </div>
                     </div>
+                    <div id="editFormError" class="error-message" style="display: none;"></div>
                     <div class="modal-buttons">
                         <button id="cancel-broadcast-btn">Отменить</button>
                         <button id="save-broadcast-btn">Сохранить</button>
@@ -88,12 +103,17 @@ function initializeBroadcasts() {
             modal.querySelector('#cancel-broadcast-btn').onclick = () => modal.remove();
 
             modal.querySelector('#save-broadcast-btn').onclick = async () => {
+                const editFormError = modal.querySelector('#editFormError');
+                editFormError.style.display = 'none';
+
                 const content = modal.querySelector('#editContent').value;
                 const scheduledTimeInput = modal.querySelector('#editScheduledTime').value;
                 const isDaily = modal.querySelector('#editIsDaily').checked;
                 const imageInput = modal.querySelector('#editImage');
 
                 if (!content) {
+                    editFormError.textContent = 'Текст рассылки обязателен';
+                    editFormError.style.display = 'block';
                     return;
                 }
 
@@ -122,50 +142,53 @@ function initializeBroadcasts() {
                     loadBroadcasts();
                 } catch (err) {
                     console.error('Error updating broadcast:', err);
+                    const errorMsg = err.response?.data?.error || 'Ошибка при обновлении рассылки';
+                    editFormError.textContent = errorMsg;
+                    editFormError.style.display = 'block';
                 }
             };
         }
 
         searchInput.addEventListener('input', () => {
             page = 1;
-            renderBroadcastsTable();
+            loadBroadcasts();
         });
         perPageSelect.addEventListener('change', (e) => {
             perPage = parseInt(e.target.value) || 25;
             page = 1;
-            renderBroadcastsTable();
+            loadBroadcasts();
         });
         prevBtn.onclick = () => {
             if (page > 1) {
                 page--;
-                renderBroadcastsTable();
+                loadBroadcasts();
             }
         };
         nextBtn.onclick = () => {
-            if (page < Math.ceil(filterBroadcasts().length / perPage)) {
+            if (page < (paginationInfo.totalPages || 1)) {
                 page++;
-                renderBroadcastsTable();
+                loadBroadcasts();
             }
         };
 
         function filterBroadcasts() {
-            const term = searchInput.value.trim().toLowerCase();
-            return broadcasts.filter(b => b.id.includes(term) || b.text.toLowerCase().includes(term));
+            return broadcasts;
         }
 
         function renderBroadcastsTable() {
             const list = filterBroadcasts();
-            const total = list.length;
-            const start = (page - 1) * perPage;
-            const slice = list.slice(start, start + perPage);
+            const total = paginationInfo.total || list.length;
 
             tbody.innerHTML = '';
             if (total === 0) {
                 tbody.innerHTML = '<tr><td colspan="6">На данный момент информация отсутствует</td></tr>';
+                pageInfo.textContent = 'Страница 1 из 1';
+                prevBtn.disabled = true;
+                nextBtn.disabled = true;
                 return;
             }
 
-            slice.forEach(b => {
+            list.forEach(b => {
                 const tr = document.createElement('tr');
                 tr.innerHTML = `
                     <td>${b.id}</td>
@@ -181,9 +204,9 @@ function initializeBroadcasts() {
                 tbody.appendChild(tr);
             });
 
-            pageInfo.textContent = `Страница ${page} из ${Math.ceil(total / perPage) || 1}`;
-            prevBtn.disabled = page === 1;
-            nextBtn.disabled = page >= Math.ceil(total / perPage);
+            pageInfo.textContent = `Страница ${paginationInfo.page || page} из ${paginationInfo.totalPages || Math.ceil(total / perPage) || 1}`;
+            prevBtn.disabled = (paginationInfo.page || page) === 1;
+            nextBtn.disabled = (paginationInfo.page || page) >= (paginationInfo.totalPages || Math.ceil(total / perPage));
 
             document.querySelectorAll('.edit-broadcast').forEach(b => {
                 b.onclick = () => {
@@ -197,16 +220,14 @@ function initializeBroadcasts() {
             document.querySelectorAll('.delete-with-broadcasts').forEach(b => {
                 b.onclick = () => {
                     api.delete(`/broadcasts/${b.dataset.id}`).then(() => {
-                        broadcasts = broadcasts.filter(item => item.id !== b.dataset.id);
-                        renderBroadcastsTable();
+                        loadBroadcasts();
                     }).catch(err => {
                         if (err.response?.status === 401 || err.response?.status === 403) {
                             localStorage.removeItem('token');
                             window.location.href = '/login';
                         } else {
                             console.error('Error deleting broadcast:', err);
-                            broadcasts = broadcasts.filter(item => item.id !== b.dataset.id);
-                            renderBroadcastsTable();
+                            loadBroadcasts();
                         }
                     });
                 };
@@ -256,7 +277,8 @@ function initializeBroadcasts() {
                         window.location.href = '/login';
                     } else {
                         console.error('Error creating broadcast:', err);
-                        formError.textContent = 'Ошибка при создании рассылки';
+                        const errorMsg = err.response?.data?.error || 'Ошибка при создании рассылки';
+                        formError.textContent = errorMsg;
                         formError.style.display = 'block';
                     }
                 });

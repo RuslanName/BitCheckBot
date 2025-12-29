@@ -12,7 +12,7 @@ const router = express.Router();
 
 router.get('/deals', authenticateToken, async (req, res) => {
     try {
-        let data = loadJson('deals');
+        let data = loadJson('deals') || [];
         if (!Array.isArray(data)) {
             data = Object.values(data);
         }
@@ -38,7 +38,7 @@ router.get('/deals', authenticateToken, async (req, res) => {
             if (term) {
                 const user = getUserById(d.userId) || {};
                 return (
-                    (d.id && d.id.toString().includes(term)) ||
+                    (d.id && d.id.toString().toLowerCase().includes(term)) ||
                     (d.userId && d.userId.toString().includes(term)) ||
                     (user.username && user.username.toLowerCase().includes(term))
                 );
@@ -79,7 +79,7 @@ router.get('/deals', authenticateToken, async (req, res) => {
 
 router.patch('/deals/:id/complete', authenticateToken, async (req, res) => {
     try {
-        let deals = loadJson('deals');
+        let deals = loadJson('deals') || [];
         const idx = deals.findIndex(d => d.id === req.params.id);
         if (idx === -1) {
             return res.sendStatus(404);
@@ -94,11 +94,11 @@ router.patch('/deals/:id/complete', authenticateToken, async (req, res) => {
         const deal = deals[idx];
         const userId = deal.userId;
         const actionText = deal.type === 'buy' ? 'Покупка' : 'Продажа';
-        const config = loadJson('config');
+        const config = loadJson('config') || {};
         const priorityPrice = deal.priority === 'elevated' ? config.priorityPriceRub : 0;
         const caption = `✅ Сделка завершена! №${deal.id}\n${actionText} ${deal.currency}\nКоличество: ${deal.cryptoAmount} ${deal.currency}\nСумма: ${deal.rubAmount} RUB\nКомиссия: ${deal.commission} RUB\nПриоритет: ${deal.priority === 'elevated' ? `Повышенный (+${priorityPrice} RUB)` : 'Обычный'}\nИтог: ${deal.total} RUB\nКошелёк: ${deal.walletAddress}`;
 
-        const users = loadJson('users');
+        const users = loadJson('users') || [];
 
         try {
             const contactUrl =
@@ -172,7 +172,7 @@ router.patch('/deals/:id/complete', authenticateToken, async (req, res) => {
 
 router.delete('/deals/:id', authenticateToken, (req, res) => {
     try {
-        let deals = loadJson('deals');
+        let deals = loadJson('deals') || [];
         const deal = deals.find(d => d.id === req.params.id);
         if (!deal) {
             return res.sendStatus(404);
@@ -191,7 +191,7 @@ router.delete('/deals/:id', authenticateToken, (req, res) => {
 
 router.get('/deals/analytics', authenticateToken, async (req, res) => {
     try {
-        let data = loadJson('deals');
+        let data = loadJson('deals') || [];
         if (!Array.isArray(data)) {
             data = Object.values(data);
         }

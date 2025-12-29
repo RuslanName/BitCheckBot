@@ -11,7 +11,10 @@ const router = express.Router();
 
 router.get('/users', authenticateToken, (req, res) => {
     try {
-        const users = loadJson('users');
+        let users = loadJson('users') || [];
+        if (!Array.isArray(users)) {
+            users = Object.values(users);
+        }
         
         const { search, page = 1, perPage = 50, registrationDate, dealsCount, turnover, activity } = req.query;
         const pageNum = parseInt(page, 10) || 1;
@@ -23,8 +26,18 @@ router.get('/users', authenticateToken, (req, res) => {
         const turnoverFilter = turnover ? parseFloat(turnover) : null;
         const activityFilter = activity || null;
         
-        const filtered = users
-            .map(u => {
+        let filtered = users.filter(u => {
+            if (term && !u.id.toString().includes(term) && !(u.username && u.username.toLowerCase().includes(term))) {
+                return false;
+            }
+            if (regDateFilter && (!u.registrationDate || u.registrationDate.split('T')[0] !== regDateFilter)) {
+                return false;
+            }
+            return true;
+        });
+        
+        if (dealsCountFilter !== null || turnoverFilter !== null || activityFilter) {
+            filtered = filtered.map(u => {
                 const userDeals = getCompletedDealsByUserId(u.id);
                 const userWithdrawals = getWithdrawalsByUserId(u.id).filter(w => w.status === 'completed');
                 const userDealsCount = userDeals.length;
@@ -46,14 +59,7 @@ router.get('/users', authenticateToken, (req, res) => {
                         lastActivityDate: latestActivity
                     }
                 };
-            })
-            .filter(u => {
-                if (term && !u.id.toString().includes(term) && !(u.username && u.username.toLowerCase().includes(term))) {
-                    return false;
-                }
-                if (regDateFilter && (!u.registrationDate || u.registrationDate.split('T')[0] !== regDateFilter)) {
-                    return false;
-                }
+            }).filter(u => {
                 if (dealsCountFilter !== null && u._stats.dealsCount < dealsCountFilter) {
                     return false;
                 }
@@ -65,6 +71,9 @@ router.get('/users', authenticateToken, (req, res) => {
                 }
                 return true;
             });
+        } else {
+            filtered = filtered.map(u => ({ ...u, _stats: null }));
+        }
         
         filtered.sort((a, b) => {
             const timeA = new Date(a.registrationDate || 0).getTime();
@@ -79,7 +88,9 @@ router.get('/users', authenticateToken, (req, res) => {
         const paginatedData = filtered.slice(startIndex, endIndex);
         
         paginatedData.forEach(u => {
-            delete u._stats;
+            if (u._stats) {
+                delete u._stats;
+            }
         });
         
         res.json({
@@ -98,26 +109,31 @@ router.get('/users', authenticateToken, (req, res) => {
 });
 
 router.put('/users/:id', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
-    const users = loadJson('users');
-    const idx = users.findIndex(u => u.id === +req.params.id);
-    if (idx !== -1) {
-        users[idx] = { ...users[idx], ...req.body };
-        saveJson('users', users);
-        return res.json(users[idx]);
+    try {
+        const users = loadJson('users') || [];
+        const idx = users.findIndex(u => u.id === +req.params.id);
+        if (idx !== -1) {
+            users[idx] = { ...users[idx], ...req.body };
+            saveJson('users', users);
+            return res.json(users[idx]);
+        }
+        res.sendStatus(404);
+    } catch (err) {
+        console.error('Error updating user:', err.message);
+        res.status(500).json({ error: 'Внутренняя ошибка сервера' });
     }
-    res.sendStatus(404);
 });
 
 router.delete('/users/:id', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
     try {
-        let users = loadJson('users');
+        let users = loadJson('users') || [];
         const userId = parseInt(req.params.id, 10);
 
-        let deals = loadJson('deals');
+        let deals = loadJson('deals') || [];
         deals = deals.filter(d => d.userId !== userId);
         saveJson('deals', deals);
 
-        let withdrawals = loadJson('withdrawals');
+        let withdrawals = loadJson('withdrawals') || [];
         withdrawals = withdrawals.filter(w => w.userId !== userId);
         saveJson('withdrawals', withdrawals);
 
@@ -138,7 +154,7 @@ router.delete('/users/:id', authenticateToken, restrictTo('mainAdmin'), (req, re
 
 router.get('/users/analytics', authenticateToken, (req, res) => {
     try {
-        let users = loadJson('users');
+        let users = loadJson('users') || [];
         if (!Array.isArray(users)) {
             users = Object.values(users);
         }

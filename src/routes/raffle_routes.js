@@ -6,20 +6,55 @@ const router = express.Router();
 
 router.get('/raffles', authenticateToken, restrictTo('mainAdmin'), async (req, res) => {
     try {
-        let data = loadJson('raffles');
+        let data = loadJson('raffles') || [];
         if (!Array.isArray(data)) {
             data = Object.values(data);
         }
 
-        const { search } = req.query;
+        const { search, page = 1, perPage = 50, status } = req.query;
         const term = search ? search.trim().toLowerCase() : '';
+        const pageNum = parseInt(page, 10) || 1;
+        const perPageNum = parseInt(perPage, 10) || 50;
 
-        data = data.filter(r => {
+        let filtered = data.filter(r => {
             if (!r || r.status === 'draft') return false;
-            return r.id.toString().includes(term);
+            
+            if (status) {
+                if (status === 'open' && r.status === 'completed') {
+                    return false;
+                }
+                if (status === 'completed' && r.status !== 'completed') {
+                    return false;
+                }
+            }
+            
+            if (term && !r.id.toString().toLowerCase().includes(term)) {
+                return false;
+            }
+            return true;
         });
 
-        res.json(data);
+        filtered.sort((a, b) => {
+            const timeA = new Date(a.timestamp || 0).getTime();
+            const timeB = new Date(b.timestamp || 0).getTime();
+            return timeB - timeA;
+        });
+
+        const total = filtered.length;
+        const totalPages = Math.ceil(total / perPageNum);
+        const startIndex = (pageNum - 1) * perPageNum;
+        const endIndex = startIndex + perPageNum;
+        const paginatedData = filtered.slice(startIndex, endIndex);
+
+        res.json({
+            data: paginatedData,
+            pagination: {
+                page: pageNum,
+                perPage: perPageNum,
+                total,
+                totalPages
+            }
+        });
     } catch (err) {
         console.error('Error fetching raffles:', err.message);
         res.status(500).json({ error: 'Внутренняя ошибка сервера' });
@@ -55,7 +90,7 @@ router.post('/raffles', authenticateToken, restrictTo('mainAdmin'), (req, res) =
 
 router.put('/raffles/:id', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
     try {
-        let list = loadJson('raffles');
+        let list = loadJson('raffles') || [];
         const idx = list.findIndex(r => r.id === req.params.id);
         if (idx === -1) {
             return res.sendStatus(404);
@@ -85,7 +120,7 @@ router.put('/raffles/:id', authenticateToken, restrictTo('mainAdmin'), (req, res
 
 router.delete('/raffles/:id', authenticateToken, restrictTo('mainAdmin'), (req, res) => {
     try {
-        let list = loadJson('raffles');
+        let list = loadJson('raffles') || [];
         list = list.filter(x => x.id !== req.params.id);
         saveJson('raffles', list);
         res.sendStatus(204);

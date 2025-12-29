@@ -12,7 +12,7 @@ const router = express.Router();
 
 router.get('/withdrawals', authenticateToken, restrictTo('mainAdmin'), async (req, res) => {
     try {
-        let data = loadJson('withdrawals');
+        let data = loadJson('withdrawals') || [];
         if (!Array.isArray(data)) {
             data = Object.values(data);
         }
@@ -38,7 +38,7 @@ router.get('/withdrawals', authenticateToken, restrictTo('mainAdmin'), async (re
             if (term) {
                 const user = getUserById(w.userId) || {};
                 return (
-                    (w.id && w.id.toString().includes(term)) ||
+                    (w.id && w.id.toString().toLowerCase().includes(term)) ||
                     (w.userId && w.userId.toString().includes(term)) ||
                     (user.username && user.username.toLowerCase().includes(term))
                 );
@@ -75,7 +75,7 @@ router.get('/withdrawals', authenticateToken, restrictTo('mainAdmin'), async (re
 
 router.patch('/withdrawals/:id/complete', authenticateToken, restrictTo('mainAdmin'), async (req, res) => {
     try {
-        let withdrawals = loadJson('withdrawals');
+        let withdrawals = loadJson('withdrawals') || [];
         const idx = withdrawals.findIndex(w => w.id === req.params.id);
         if (idx === -1) {
             return res.sendStatus(404);
@@ -88,7 +88,7 @@ router.patch('/withdrawals/:id/complete', authenticateToken, restrictTo('mainAdm
         const userId = withdrawal.userId;
         const caption = `✅ Вывод рефералов завершен! №${withdrawal.id}\nКоличество: ${withdrawal.cryptoAmount} BTC (~${withdrawal.rubAmount} RUB)\nКошелёк: ${withdrawal.walletAddress}`;
 
-        const config = loadJson('config');
+        const config = loadJson('config') || {};
 
         try {
             const operators = config.multipleOperatorsData.filter(op => op.currency === 'BTC');

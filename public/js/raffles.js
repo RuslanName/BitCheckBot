@@ -26,6 +26,7 @@ function initializeRaffles() {
         let page = 1;
         let perPage = parseInt(perPageSelect.value) || 50;
         let showCompleted = false;
+        let paginationInfo = { total: 0, totalPages: 0, page: 1, perPage: 50 };
 
         const tabContainer = document.createElement('div');
         tabContainer.className = 'tab-container';
@@ -46,9 +47,22 @@ function initializeRaffles() {
         conditionTypeSelect.addEventListener('change', updateConditionFields);
 
         function loadRaffles() {
-            const term = searchInput.value.trim().toLowerCase();
-            api.get(`/raffles?search=${encodeURIComponent(term)}`).then(r => {
-                raffles = Array.isArray(r.data) ? r.data : Object.values(r.data);
+            const params = {
+                page,
+                perPage,
+                status: showCompleted ? 'completed' : 'open'
+            };
+            const search = searchInput.value.trim();
+            if (search) {
+                params.search = search;
+            }
+
+            tbody.innerHTML = '<tr><td colspan="5">Загрузка...</td></tr>';
+
+            api.get('/raffles', { params }).then(r => {
+                const response = r.data;
+                raffles = response.data || [];
+                paginationInfo = response.pagination || { total: 0, totalPages: 0, page: 1, perPage: 50 };
                 renderRafflesTable();
             }).catch(err => {
                 console.error('Error loading raffles:', err);
@@ -258,20 +272,20 @@ function initializeRaffles() {
         perPageSelect.addEventListener('change', (e) => {
             perPage = parseInt(e.target.value) || 25;
             page = 1;
-            renderRafflesTable();
+            loadRaffles();
         });
 
         prevBtn.onclick = () => {
             if (page > 1) {
                 page--;
-                renderRafflesTable();
+                loadRaffles();
             }
         };
 
         nextBtn.onclick = () => {
-            if (page < Math.ceil(filterRaffles().length / perPage)) {
+            if (page < (paginationInfo.totalPages || 1)) {
                 page++;
-                renderRafflesTable();
+                loadRaffles();
             }
         };
 
@@ -285,23 +299,20 @@ function initializeRaffles() {
             });
         });
 
-        function filterRaffles() {
-            return raffles.filter(r => r.status === (showCompleted ? 'completed' : 'pending'));
-        }
-
         function renderRafflesTable() {
-            const list = filterRaffles();
-            const total = list.length;
-            const start = (page - 1) * perPage;
-            const slice = list.slice(start, start + perPage);
+            const list = raffles;
+            const total = paginationInfo.total || list.length;
 
             tbody.innerHTML = '';
             if (total === 0) {
                 tbody.innerHTML = '<tr><td colspan="5">На данный момент информация отсутствует</td></tr>';
+                pageInfo.textContent = 'Страница 1 из 1';
+                prevBtn.disabled = true;
+                nextBtn.disabled = true;
                 return;
             }
 
-            slice.forEach(r => {
+            list.forEach(r => {
                 const tr = document.createElement('tr');
                 const isCompleted = r.status === 'completed';
                 const conditionText = r.condition.type === 'dealCount' ? `Количество сделок: ${r.condition.value || '-'}` :
@@ -323,9 +334,9 @@ function initializeRaffles() {
                 tbody.appendChild(tr);
             });
 
-            pageInfo.textContent = `Страница ${page} из ${Math.ceil(total / perPage) || 1}`;
-            prevBtn.disabled = page === 1;
-            nextBtn.disabled = page >= Math.ceil(total / perPage);
+            pageInfo.textContent = `Страница ${paginationInfo.page || page} из ${paginationInfo.totalPages || Math.ceil(total / perPage) || 1}`;
+            prevBtn.disabled = (paginationInfo.page || page) === 1;
+            nextBtn.disabled = (paginationInfo.page || page) >= (paginationInfo.totalPages || Math.ceil(total / perPage));
 
             document.querySelectorAll('.edit-raffle').forEach(btn => {
                 btn.addEventListener('click', () => {
@@ -339,13 +350,14 @@ function initializeRaffles() {
             document.querySelectorAll('.delete-raffle').forEach(btn => {
                 btn.addEventListener('click', () => {
                     api.delete(`/raffles/${btn.dataset.id}`).then(() => {
-                        raffles = raffles.filter(r => r.id !== btn.dataset.id);
-                        renderRafflesTable();
+                        loadRaffles();
                     }).catch(err => {
                         console.error('Error deleting raffle:', err);
                         if (err.response?.status === 401 || err.response?.status === 403) {
                             localStorage.removeItem('token');
                             window.location.href = '/login';
+                        } else {
+                            loadRaffles();
                         }
                     });
                 });
