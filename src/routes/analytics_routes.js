@@ -81,7 +81,6 @@ router.get('/analytics/stats', authenticateToken, (req, res) => {
             stats.users[period] = registeredUsers.length;
         });
 
-        console.log('Analytics stats calculated:', JSON.stringify(stats, null, 2));
         res.json(stats);
     } catch (err) {
         console.error('Error fetching analytics stats:', err.message);

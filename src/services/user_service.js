@@ -65,6 +65,22 @@ async function isValidChat(chatId) {
     }
 }
 
+function isOperator(userId) {
+    const config = loadJson('config');
+    const users = loadJson('users');
+    const user = users.find(u => u.id === userId);
+    
+    if (!user || !user.username) {
+        return false;
+    }
+    
+    if (config.multipleOperatorsMode && config.multipleOperatorsData.length > 0) {
+        return config.multipleOperatorsData.some(op => op.username === user.username);
+    }
+    
+    return user.username === config.singleOperatorUsername;
+}
+
 async function checkIfBlocked(ctx) {
     const users = loadJson('users');
     const user = users.find(u => u.id === ctx.from.id);
@@ -81,6 +97,7 @@ module.exports = {
     getOperatorContactUrl,
     getOperators,
     isValidChat,
-    checkIfBlocked
+    checkIfBlocked,
+    isOperator
 };
 

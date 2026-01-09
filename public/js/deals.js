@@ -36,12 +36,19 @@ function initializeDeals() {
         `;
         filterGroup.appendChild(bulkActionContainer);
 
+        const globalActionContainer = document.createElement('div');
+        globalActionContainer.className = 'global-action-container';
+        globalActionContainer.innerHTML = `
+            <button id="completeAll">Завершить все сделки</button>
+            <button id="deleteAll">Удалить все сделки</button>
+        `;
+        filterGroup.appendChild(globalActionContainer);
+
         const users = [];
         let page = 1;
         let perPage = parseInt(perPageSelect.value) || 50;
         let activeTab = 'open';
         let selectedDeals = new Set();
-        let lastSelectedDealId = null;
         let paginationInfo = { total: 0, totalPages: 0 };
 
         function loadDeals() {
@@ -128,6 +135,7 @@ function initializeDeals() {
                 ));
                 selectedDeals.clear();
                 bulkActionContainer.style.display = 'none';
+                globalActionContainer.style.display = 'flex';
                 loadDeals();
             } catch (err) {
                 console.error('Error completing selected deals:', err);
@@ -147,6 +155,7 @@ function initializeDeals() {
                 ));
                 selectedDeals.clear();
                 bulkActionContainer.style.display = 'none';
+                globalActionContainer.style.display = 'flex';
                 loadDeals();
             } catch (err) {
                 console.error('Error deleting selected deals:', err);
@@ -162,14 +171,85 @@ function initializeDeals() {
         bulkActionContainer.querySelector('#cancelSelection').onclick = () => {
             selectedDeals.clear();
             bulkActionContainer.style.display = 'none';
+            globalActionContainer.style.display = 'flex';
             loadDeals();
         };
+
+        globalActionContainer.querySelector('#completeAll').onclick = async () => {
+            if (!confirm('Вы уверены, что хотите завершить все открытые сделки?')) return;
+            
+            try {
+                // Загружаем все открытые сделки без пагинации
+                const allDealsResponse = await api.get('/deals', { params: { status: 'open', perPage: 10000 } });
+                const allOpenDeals = allDealsResponse.data.data || [];
+                
+                if (allOpenDeals.length === 0) {
+                    alert('Нет открытых сделок для завершения');
+                    return;
+                }
+                
+                await Promise.all(allOpenDeals.map(deal =>
+                    api.patch(`/deals/${deal.id}/complete`)
+                ));
+                
+                selectedDeals.clear();
+                bulkActionContainer.style.display = 'none';
+                globalActionContainer.style.display = 'flex';
+                loadDeals();
+                
+                alert(`Успешно завершено ${allOpenDeals.length} сделок`);
+            } catch (err) {
+                console.error('Error completing all deals:', err);
+                if (err.response?.status === 401 || err.response?.status === 403) {
+                    localStorage.removeItem('token');
+                    window.location.href = '/login';
+                } else {
+                    alert(err.response?.data?.error || 'Ошибка при завершении всех сделок');
+                }
+            }
+        };
+
+        globalActionContainer.querySelector('#deleteAll').onclick = async () => {
+            if (!confirm('Вы уверены, что хотите удалить все открытые сделки?')) return;
+            
+            try {
+                // Загружаем все открытые сделки без пагинации
+                const allDealsResponse = await api.get('/deals', { params: { status: 'open', perPage: 10000 } });
+                const allOpenDeals = allDealsResponse.data.data || [];
+                
+                if (allOpenDeals.length === 0) {
+                    alert('Нет открытых сделок для удаления');
+                    return;
+                }
+                
+                await Promise.all(allOpenDeals.map(deal =>
+                    api.delete(`/deals/${deal.id}`)
+                ));
+                
+                selectedDeals.clear();
+                bulkActionContainer.style.display = 'none';
+                globalActionContainer.style.display = 'flex';
+                loadDeals();
+                
+                alert(`Успешно удалено ${allOpenDeals.length} сделок`);
+            } catch (err) {
+                console.error('Error deleting all deals:', err);
+                if (err.response?.status === 401 || err.response?.status === 403) {
+                    localStorage.removeItem('token');
+                    window.location.href = '/login';
+                } else {
+                    alert(err.response?.data?.error || 'Ошибка при удалении всех сделок');
+                }
+            }
+        };
+
 
         function renderDealsTable(deals) {
             tbody.innerHTML = '';
             if (!deals || deals.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="12">На данный момент информация отсутствует</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="13">На данный момент информация отсутствует</td></tr>';
                 bulkActionContainer.style.display = 'none';
+                globalActionContainer.style.display = 'flex';
                 const table = document.querySelector('table');
                 table.style.userSelect = 'auto';
                 pageInfo.textContent = `Страница 0 из 0`;
@@ -186,6 +266,7 @@ function initializeDeals() {
                 tr.className = isSelected ? 'selected' : isElevated ? 'priority-elevated' : '';
                 tr.dataset.id = d.id;
                 tr.innerHTML = `
+                    <td><input type="checkbox" class="deal-checkbox" data-id="${d.id}" ${d.status === 'completed' || d.status === 'expired' ? 'disabled' : ''} ${isSelected ? 'checked' : ''}></td>
                     <td>${d.id || '-'}</td>
                     <td><a href="https://t.me/${user.username}" target="_blank">${user.username || d.username}</a></td>
                     <td>${d.type === 'buy' ? 'Покупка' : 'Продажа'}</td>
@@ -214,7 +295,9 @@ function initializeDeals() {
             nextBtn.disabled = page >= paginationInfo.totalPages;
 
             bulkActionContainer.style.display = selectedDeals.size > 0 ? 'flex' : 'none';
+            globalActionContainer.style.display = selectedDeals.size > 0 ? 'none' : 'flex';
 
+            const allCheckboxes = document.querySelectorAll('.deal-checkbox:not(:disabled)');
             const allRows = document.querySelectorAll('tr[data-id]');
             allRows.forEach(tr => {
                 const dealId = tr.dataset.id;
@@ -234,53 +317,27 @@ function initializeDeals() {
                 } else {
                     tr.classList.remove('priority-elevated');
                 }
+            });
 
-                tr.addEventListener('click', (e) => {
-                    if (e.target.tagName === 'BUTTON' || e.target.tagName === 'A') return;
-                    e.preventDefault();
-                    e.stopPropagation();
-                    if (deal.status === 'completed' || deal.status === 'expired') return;
-
-                    const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-                    const isMultiSelect = isMac ? e.metaKey : e.ctrlKey;
-                    const isRangeSelect = e.shiftKey;
-
-                    if (isRangeSelect && lastSelectedDealId) {
-                        const currentIndex = Array.from(allRows).findIndex(row => row.dataset.id === dealId);
-                        const lastIndex = Array.from(allRows).findIndex(row => row.dataset.id === lastSelectedDealId);
-                        const startIndex = Math.min(currentIndex, lastIndex);
-                        const endIndex = Math.max(currentIndex, lastIndex);
-
-                        for (let i = startIndex; i <= endIndex; i++) {
-                            const rowDealId = allRows[i].dataset.id;
-                            const rowDeal = deals.find(d => d.id === rowDealId);
-                            if (rowDeal && rowDeal.status !== 'completed' && rowDeal.status !== 'expired' && !selectedDeals.has(rowDealId)) {
-                                selectedDeals.add(rowDealId);
-                                allRows[i].classList.add('selected');
-                            }
-                        }
-                        lastSelectedDealId = dealId;
-                    } else if (isMultiSelect) {
-                        if (selectedDeals.has(dealId)) {
-                            selectedDeals.delete(dealId);
-                            tr.classList.remove('selected');
-                            lastSelectedDealId = Array.from(selectedDeals).pop() || null;
-                        } else {
-                            selectedDeals.add(dealId);
-                            tr.classList.add('selected');
-                            lastSelectedDealId = dealId;
-                        }
-                    } else {
-                        selectedDeals.clear();
-                        allRows.forEach(row => row.classList.remove('selected'));
+            document.querySelectorAll('.deal-checkbox').forEach(checkbox => {
+                checkbox.addEventListener('change', (e) => {
+                    const dealId = e.target.dataset.id;
+                    const deal = deals.find(d => d.id === dealId);
+                    
+                    if (e.target.checked) {
                         selectedDeals.add(dealId);
-                        tr.classList.add('selected');
-                        lastSelectedDealId = dealId;
+                        e.target.closest('tr').classList.add('selected');
+                    } else {
+                        selectedDeals.delete(dealId);
+                        e.target.closest('tr').classList.remove('selected');
                     }
-
-                    const table = document.querySelector('table');
-                    table.style.userSelect = selectedDeals.size > 0 ? 'none' : 'auto';
+                    
                     bulkActionContainer.style.display = selectedDeals.size > 0 ? 'flex' : 'none';
+                    globalActionContainer.style.display = selectedDeals.size > 0 ? 'none' : 'flex';
+                });
+                
+                checkbox.addEventListener('click', (e) => {
+                    e.stopPropagation();
                 });
             });
 

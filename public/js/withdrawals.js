@@ -40,7 +40,6 @@ function initializeWithdrawals() {
         let perPage = parseInt(perPageSelect.value) || 50;
         let activeTab = 'open';
         let selectedWithdrawals = new Set();
-        let lastSelectedWithdrawalId = null;
         let paginationInfo = { total: 0, totalPages: 0 };
 
         function loadWithdrawals() {
@@ -54,7 +53,7 @@ function initializeWithdrawals() {
                 params.search = search;
             }
 
-            tbody.innerHTML = '<tr><td colspan="7">Загрузка...</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="8">Загрузка...</td></tr>';
 
             Promise.all([
                 api.get('/withdrawals', { params }),
@@ -72,7 +71,7 @@ function initializeWithdrawals() {
                     localStorage.removeItem('token');
                     window.location.href = '/login';
                 } else {
-                    tbody.innerHTML = '<tr><td colspan="7">Ошибка загрузки информации</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="8">Ошибка загрузки информации</td></tr>';
                 }
             });
         }
@@ -124,6 +123,7 @@ function initializeWithdrawals() {
                     api.patch(`/withdrawals/${withdrawalId}/complete`)
                 ));
                 selectedWithdrawals.clear();
+                bulkActionContainer.style.display = 'none';
                 loadWithdrawals();
             } catch (err) {
                 console.error('Error completing selected withdrawals:', err);
@@ -138,7 +138,7 @@ function initializeWithdrawals() {
 
         bulkActionContainer.querySelector('#cancelSelection').onclick = () => {
             selectedWithdrawals.clear();
-            lastSelectedWithdrawalId = null;
+            bulkActionContainer.style.display = 'none';
             loadWithdrawals();
         };
 
@@ -148,7 +148,8 @@ function initializeWithdrawals() {
 
             tbody.innerHTML = '';
             if (total === 0 || list.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="7">На данный момент информация отсутствует</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="8">На данный момент информация отсутствует</td></tr>';
+                bulkActionContainer.style.display = 'none';
                 pageInfo.textContent = 'Страница 1 из 1';
                 prevBtn.disabled = true;
                 nextBtn.disabled = true;
@@ -161,10 +162,12 @@ function initializeWithdrawals() {
                 const username = user ? user.username : w.userId;
                 const tr = document.createElement('tr');
                 tr.dataset.id = buttonId;
-                if (selectedWithdrawals.has(buttonId)) {
+                const isSelected = selectedWithdrawals.has(buttonId);
+                if (isSelected) {
                     tr.classList.add('selected');
                 }
                 tr.innerHTML = `
+                    <td><input type="checkbox" class="withdrawal-checkbox" data-id="${buttonId}" ${w.status === 'completed' ? 'disabled' : ''} ${isSelected ? 'checked' : ''}></td>
                     <td>${buttonId}</td>
                     <td>${username}</td>
                     <td>${formatNumber(w.rubAmount, 2)}</td>
@@ -186,56 +189,24 @@ function initializeWithdrawals() {
 
             bulkActionContainer.style.display = selectedWithdrawals.size > 0 ? 'flex' : 'none';
 
-            document.querySelectorAll('tr[data-id]').forEach(tr => {
-                tr.addEventListener('click', (e) => {
-                    if (e.target.tagName === 'BUTTON' || e.target.tagName === 'A') return;
-                    e.preventDefault();
-                    e.stopPropagation();
-                    const withdrawalId = tr.dataset.id;
+            document.querySelectorAll('.withdrawal-checkbox').forEach(checkbox => {
+                checkbox.addEventListener('change', (e) => {
+                    const withdrawalId = e.target.dataset.id;
                     const withdrawal = withdrawals.find(w => w.id === withdrawalId);
-                    if (withdrawal.status === 'completed') return;
-
-                    const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-                    const isMultiSelect = isMac ? e.metaKey : e.ctrlKey;
-                    const isRangeSelect = e.shiftKey;
-
-                    if (isRangeSelect && lastSelectedWithdrawalId) {
-                        const allRows = Array.from(document.querySelectorAll('tr[data-id]'));
-                        const currentIndex = allRows.findIndex(row => row.dataset.id === withdrawalId);
-                        const lastIndex = allRows.findIndex(row => row.dataset.id === lastSelectedWithdrawalId);
-                        const startIndex = Math.min(currentIndex, lastIndex);
-                        const endIndex = Math.max(currentIndex, lastIndex);
-
-                        for (let i = startIndex; i <= endIndex; i++) {
-                            const rowWithdrawalId = allRows[i].dataset.id;
-                            const rowWithdrawal = withdrawals.find(w => w.id === rowWithdrawalId);
-                            if (rowWithdrawal.status !== 'completed' && !selectedWithdrawals.has(rowWithdrawalId)) {
-                                selectedWithdrawals.add(rowWithdrawalId);
-                                allRows[i].classList.add('selected');
-                            }
-                        }
-                        lastSelectedWithdrawalId = withdrawalId;
-                    } else if (isMultiSelect) {
-                        if (selectedWithdrawals.has(withdrawalId)) {
-                            selectedWithdrawals.delete(withdrawalId);
-                            tr.classList.remove('selected');
-                            lastSelectedWithdrawalId = Array.from(selectedWithdrawals).pop() || null;
-                        } else {
-                            selectedWithdrawals.add(withdrawalId);
-                            tr.classList.add('selected');
-                            lastSelectedWithdrawalId = withdrawalId;
-                        }
-                    } else {
-                        selectedWithdrawals.clear();
-                        document.querySelectorAll('tr[data-id]').forEach(row => row.classList.remove('selected'));
+                    
+                    if (e.target.checked) {
                         selectedWithdrawals.add(withdrawalId);
-                        tr.classList.add('selected');
-                        lastSelectedWithdrawalId = withdrawalId;
+                        e.target.closest('tr').classList.add('selected');
+                    } else {
+                        selectedWithdrawals.delete(withdrawalId);
+                        e.target.closest('tr').classList.remove('selected');
                     }
-
-                    const table = document.querySelector('table');
-                    table.style.userSelect = selectedWithdrawals.size > 0 ? 'none' : 'auto';
+                    
                     bulkActionContainer.style.display = selectedWithdrawals.size > 0 ? 'flex' : 'none';
+                });
+                
+                checkbox.addEventListener('click', (e) => {
+                    e.stopPropagation();
                 });
             });
 

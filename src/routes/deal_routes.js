@@ -22,7 +22,7 @@ router.get('/deals', authenticateToken, async (req, res) => {
         const perPageNum = parseInt(perPage, 10) || 50;
 
         let filtered = data.filter(d => {
-            if (!d || d.status === 'draft') return false;
+            if (!d || d.status === 'draft' || d.status === 'unpaid') return false;
             
             if (status) {
                 const statusMap = {

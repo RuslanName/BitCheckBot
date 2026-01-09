@@ -91,17 +91,21 @@ function buildSellAmountInputMessage(currency, minRub, maxRub, minCrypto, maxCry
     return `💸 Введите сумму для продажи ${currency} (в RUB или ${currency})\nМин: ${minRub} RUB (~${minCrypto} ${currency})\nМакс: ${maxRub} RUB (~${maxCrypto} ${currency})`;
 }
 
-function buildDealCreatedMessage(deal, discount, priorityPrice, paymentSystemText, paymentDetailsText, selectedPaymentDetails) {
+function buildDealCreatedMessage(deal, discount, priorityPrice, paymentSystemText, paymentDetailsText, selectedPaymentDetails, isOperator = false) {
     const actionText = deal.type === 'buy' ? 'Покупка' : 'Продажа';
     const paymentInstructions = deal.type === 'buy'
         ? MESSAGES.DEAL_PAYMENT_INSTRUCTIONS_BUY(!!selectedPaymentDetails)
         : MESSAGES.DEAL_PAYMENT_INSTRUCTIONS_SELL;
     
+    const commissionText = isOperator 
+        ? `Комиссия: ${deal.commission} RUB (скидка ${discount.toFixed(2)}%)\n`
+        : '';
+    
     return `${MESSAGES.DEAL_CREATED(deal.id)}\n` +
         `${actionText} ${deal.currency}\n` +
         `Количество: ${deal.cryptoAmount} ${deal.currency}\n` +
         `Сумма: ${deal.rubAmount} RUB\n` +
-        `Комиссия: ${deal.commission} RUB (скидка ${discount.toFixed(2)}%)\n` +
+        `${commissionText}` +
         `Приоритет: ${deal.priority === 'elevated' ? `Повышенный (+${priorityPrice} RUB)` : 'Обычный'}\n` +
         `${paymentSystemText}` +
         `Итог: ${deal.total} RUB\n` +
@@ -211,12 +215,15 @@ function buildSupportReplyUserReplyMarkup(userId) {
     };
 }
 
-function buildDealConfirmationMessage(deal, discount, priorityPrice, paymentSystemText, paymentTarget, isTenthDeal = false) {
+function buildDealConfirmationMessage(deal, discount, priorityPrice, paymentSystemText, paymentTarget, isTenthDeal = false, isOperator = false) {
     const actionText = deal.type === 'buy' ? 'покупки' : 'продажи';
     const paymentSystemLine = paymentSystemText || '';
-    const commissionText = isTenthDeal 
-        ? `Комиссия: ${deal.commission} RUB (бесплатная сделка, 10-я по счёту!)`
-        : `Комиссия: ${deal.commission} RUB (скидка ${discount.toFixed(2)}%)`;
+    
+    const commissionText = isOperator 
+        ? (isTenthDeal 
+            ? `Комиссия: ${deal.commission} RUB (бесплатная сделка, 10-я по счёту!)`
+            : `Комиссия: ${deal.commission} RUB (скидка ${discount.toFixed(2)}%)`)
+        : '';
     
     return `✅ Подтверждение ${actionText} ${deal.currency}\n` +
         `Количество: ${deal.cryptoAmount} ${deal.currency}\n` +
@@ -246,12 +253,16 @@ function buildDealConfirmationReplyMarkup(dealId, paymentVariant = null, showPay
     };
 }
 
-function buildDealCompletedMessage(deal, discount, priorityPrice) {
+function buildDealCompletedMessage(deal, discount, priorityPrice, isOperator = false) {
+    const commissionText = isOperator 
+        ? `Комиссия: ${deal.commission} RUB (скидка ${discount.toFixed(2)}%)\n`
+        : '';
+    
     return `✅ Сделка №${deal.id} завершена!\n` +
         `Покупка ${deal.currency}\n` +
         `Количество: ${deal.cryptoAmount} ${deal.currency}\n` +
         `Сумма: ${deal.rubAmount} RUB\n` +
-        `Комиссия: ${deal.commission} RUB (скидка ${discount.toFixed(2)}%)\n` +
+        `${commissionText}` +
         `Приоритет: ${deal.priority === 'elevated' ? `Повышенный (+${priorityPrice} RUB)` : 'Обычный'}\n` +
         `Итог: ${deal.total} RUB\n` +
         `Кошелёк: ${deal.walletAddress}`;
