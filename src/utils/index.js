@@ -1,9 +1,9 @@
-const { loadJson, saveJson } = require('./storage_utils');
-const { formatDate } = require('./date_utils');
-const { loadStates, clearPendingStates } = require('./state_utils');
-const { sendBitCheckPhoto, setMainBotInstance } = require('./telegram_utils');
-const { generateCaptcha } = require('./captcha_utils');
-const { axiosWithRetry, telegramWithRetry } = require('./retry_utils');
+const { loadJson, saveJson } = require('./storage-utils');
+const { formatDate } = require('./date-utils');
+const { loadStates, clearPendingStates } = require('./state-utils');
+const { sendBitCheckPhoto, sendReviewPhoto, setMainBotInstance } = require('./telegram-utils');
+const { generateCaptcha } = require('./captcha-utils');
+const { axiosWithRetry, telegramWithRetry } = require('./retry-utils');
 
 function shouldLogSendError(error) {
     if (!error || !error.message) return true;
@@ -25,6 +25,7 @@ module.exports = {
     loadStates,
     clearPendingStates,
     sendBitCheckPhoto,
+    sendReviewPhoto,
     setMainBotInstance,
     generateCaptcha,
     shouldLogSendError,

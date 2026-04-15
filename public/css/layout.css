@@ -1,6 +1,7 @@
 .container {
     display: flex;
     min-height: 100vh;
+    position: relative;
 }
 
 nav {
@@ -13,20 +14,124 @@ nav {
     position: fixed;
     top: 0;
     bottom: 0;
+    left: 0;
     z-index: 100;
+    transition: left 0.3s ease;
+    overflow: hidden;
+}
+
+body.sidebar-collapsed nav {
+    left: -220px;
+    box-shadow: none;
+}
+
+.sidebar-show-btn {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 99;
+    width: 36px;
+    border: none;
+    background: linear-gradient(180deg, #2c3e50 0%, #34495e 100%);
+    border-right: 1px solid rgba(52, 73, 94, 0.5);
+    cursor: pointer;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    color: #ecf0f1;
+    transition: all 0.3s ease;
+    padding: 0;
+    margin: 0;
+    border-radius: 0;
+}
+
+.sidebar-show-btn svg {
+    width: 20px;
+    height: 20px;
+}
+
+body.sidebar-collapsed .sidebar-show-btn {
+    display: flex;
+}
+
+.sidebar-show-btn:hover {
+    background: rgba(0, 0, 0, 0.35);
+}
+
+.sidebar-toggle {
+    padding: 12px 12px;
+    border: none;
+    border-bottom: 1px solid rgba(52, 73, 94, 0.5);
+    background: rgba(0, 0, 0, 0.15);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #bdc3c7;
+    transition: all 0.3s ease;
+    font-size: 14px;
+    font-weight: 500;
+    width: 100%;
+    box-sizing: border-box;
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    margin: 0;
+    text-align: left;
+    font-family: inherit;
+    line-height: normal;
+    border-radius: 0;
+    outline: none;
+}
+
+.sidebar-toggle:hover {
+    background: rgba(0, 0, 0, 0.25);
+    color: #ecf0f1;
+}
+
+.sidebar-toggle svg {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+    transition: transform 0.3s ease;
+}
+
+.sidebar-toggle span {
+    flex-shrink: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 nav a {
-    padding: 16px 20px;
+    padding: 12px 12px;
     color: #bdc3c7;
     text-decoration: none;
     border-bottom: 1px solid rgba(52, 73, 94, 0.5);
     transition: all 0.3s ease;
     position: relative;
     font-weight: 500;
-    display: block;
+    display: flex;
+    align-items: center;
+    gap: 8px;
     word-wrap: break-word;
     hyphens: auto;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+nav a svg {
+    flex-shrink: 0;
+}
+
+nav a span {
+    flex-shrink: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 nav a:before {
@@ -50,7 +155,62 @@ nav a.active,
 nav a:hover {
     background: rgba(52, 73, 94, 0.8);
     color: #ecf0f1;
-    padding-left: 25px;
+    transform: translateX(4px);
+}
+
+#logoutBtn {
+    margin-top: auto;
+    margin-bottom: 0;
+    margin-left: 0;
+    margin-right: 0;
+    border-bottom: none;
+    border-top: 1px solid rgba(52, 73, 94, 0.5);
+    padding: 12px 12px;
+    background: rgba(0, 0, 0, 0.15);
+    width: 100%;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    color: #bdc3c7;
+    transition: all 0.3s ease;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    border-left: none;
+    border-right: none;
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    text-align: center;
+    font-family: inherit;
+    line-height: normal;
+    border-radius: 0;
+    outline: none;
+}
+
+#logoutBtn:hover {
+    background: rgba(0, 0, 0, 0.25);
+    color: #ecf0f1;
+}
+
+#logoutBtn:before {
+    display: none;
+}
+
+#logoutBtn svg {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+}
+
+#logoutBtn span {
+    flex-shrink: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 main {
@@ -59,6 +219,11 @@ main {
     overflow-y: auto;
     background: #f8f9fa;
     margin-left: 220px;
+    transition: margin-left 0.3s ease;
+}
+
+body.sidebar-collapsed main {
+    margin-left: 36px;
 }
 
 .header {
@@ -78,6 +243,12 @@ section {
     box-shadow: 0 2px 12px rgba(0,0,0,0.08);
     overflow-x: auto;
     border: 1px solid #e9ecef;
+}
+
+section h2 {
+    padding-bottom: 16px;
+    margin-bottom: 20px;
+    border-bottom: 2px solid #e9ecef;
 }
 
 .login-container {

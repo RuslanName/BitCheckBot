@@ -3,6 +3,7 @@ const links = [
     { href: '/users', page: 'users', label: 'Пользователи', roles: ['mainAdmin'] },
     { href: '/deals', page: 'deals', label: 'Сделки', roles: ['mainAdmin', 'admin'] },
     { href: '/withdrawals', page: 'withdrawals', label: 'Вывод рефералов', roles: ['mainAdmin'] },
+    { href: '/cashback', page: 'cashback', label: 'Кешбек', roles: ['mainAdmin'] },
     { href: '/raffles', page: 'raffles', label: 'Розыгрыши', roles: ['mainAdmin'] },
     { href: '/broadcasts', page: 'broadcasts', label: 'Рассылка', roles: ['mainAdmin'] },
     { href: '/analytics', page: 'analytics', label: 'Аналитика', roles: ['mainAdmin'] }
@@ -23,15 +24,54 @@ function initializeSidebar(userRole) {
                 }
             }
         });
+
+        // Prevent sidebar links from processing button clicks
+        const toggleBtn = sidebar.querySelector('#sidebarToggle');
+        if (toggleBtn) {
+            toggleBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+            });
+        }
+
         const logoutBtn = sidebar.querySelector('#logoutBtn');
         if (logoutBtn) {
-            logoutBtn.addEventListener('click', () => {
+            logoutBtn.addEventListener('click', (e) => {
+                e.preventDefault();
                 localStorage.removeItem('token');
                 window.location.href = '/login';
             });
         }
     }
+
+    // Sidebar toggle functionality
+    const sidebarToggle = document.getElementById('sidebarToggle');
+    const sidebarShowBtn = document.getElementById('sidebarShowBtn');
+
+    // Check localStorage for sidebar state
+    const isSidebarCollapsed = localStorage.getItem('sidebarCollapsed') === 'true';
+    if (isSidebarCollapsed) {
+        document.body.classList.add('sidebar-collapsed');
+    }
+
+    // Show body after applying sidebar state
+    document.body.classList.add('loaded');
+
+    if (sidebarToggle) {
+        sidebarToggle.addEventListener('click', () => {
+            document.body.classList.toggle('sidebar-collapsed');
+            const isCollapsed = document.body.classList.contains('sidebar-collapsed');
+            localStorage.setItem('sidebarCollapsed', isCollapsed);
+        });
+    }
+
+    if (sidebarShowBtn) {
+        sidebarShowBtn.addEventListener('click', () => {
+            document.body.classList.remove('sidebar-collapsed');
+            localStorage.setItem('sidebarCollapsed', 'false');
+        });
+    }
 }
+
 
 function checkAccess(userRole) {
     const curr = window.location.pathname.replace(/\/$/, '').slice(1) || 'config';

@@ -1,4 +1,4 @@
-import { api, formatDateTime, formatNumber, checkAuth } from './utils.js';
+import { api, formatDateTime, formatNumber, checkAuth, setupModalCloseOnOverlayClick } from './utils.js';
 import { initializeSidebar, checkAccess } from './sidebar.js';
 
 function initializeRaffles() {
@@ -31,8 +31,17 @@ function initializeRaffles() {
         const tabContainer = document.createElement('div');
         tabContainer.className = 'tab-container';
         tabContainer.innerHTML = `
-            <button class="tab-button active" data-status="open">Открытые</button>
-            <button class="tab-button" data-status="completed">Завершенные</button>
+            <button class="tab-button active" data-status="open">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M8 12h8M12 8v8"/>
+                </svg>Открытые
+            </button>
+            <button class="tab-button" data-status="completed">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="20 6 9 17 4 12"/>
+                </svg>Завершенные
+            </button>
         `;
         const filterGroup = searchInput.closest('.filter-group') || searchInput.parentElement;
         filterGroup.parentNode.insertBefore(tabContainer, filterGroup.nextSibling);
@@ -110,6 +119,7 @@ function initializeRaffles() {
             `).join('');
             modal.innerHTML = `
                 <div class="modal-content">
+                    <button class="close-modal" type="button" aria-label="Закрыть">×</button>
                     <h3>Редактировать розыгрыш</h3>
                     <div class="form-group-horizontal">
                         <div class="form-subgroup">
@@ -156,6 +166,11 @@ function initializeRaffles() {
                 </div>
             `;
             document.body.appendChild(modal);
+            setupModalCloseOnOverlayClick(modal);
+            const closeBtn = modal.querySelector('.close-modal');
+            if (closeBtn) {
+                closeBtn.onclick = () => modal.remove();
+            }
 
             const editConditionTypeSelect = modal.querySelector('#editConditionType');
             const editConditionFields = modal.querySelector('#editConditionFields');
@@ -305,7 +320,7 @@ function initializeRaffles() {
 
             tbody.innerHTML = '';
             if (total === 0) {
-                tbody.innerHTML = '<tr><td colspan="5">На данный момент информация отсутствует</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; padding: 40px; color: #999;">На данный момент информация отсутствует</td></tr>';
                 pageInfo.textContent = 'Страница 1 из 1';
                 prevBtn.disabled = true;
                 nextBtn.disabled = true;
@@ -349,15 +364,14 @@ function initializeRaffles() {
 
             document.querySelectorAll('.delete-raffle').forEach(btn => {
                 btn.addEventListener('click', () => {
-                    api.delete(`/raffles/${btn.dataset.id}`).then(() => {
+                    const raffleId = btn.dataset.id;
+                    api.delete(`/raffles/${raffleId}`).then(() => {
                         loadRaffles();
                     }).catch(err => {
                         console.error('Error deleting raffle:', err);
                         if (err.response?.status === 401 || err.response?.status === 403) {
                             localStorage.removeItem('token');
                             window.location.href = '/login';
-                        } else {
-                            loadRaffles();
                         }
                     });
                 });

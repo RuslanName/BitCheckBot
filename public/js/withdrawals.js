@@ -19,8 +19,23 @@ function initializeWithdrawals() {
         const tabContainer = document.createElement('div');
         tabContainer.className = 'tab-container';
         tabContainer.innerHTML = `
-            <button class="tab-button active" data-status="open">Открытые</button>
-            <button class="tab-button" data-status="completed">Завершенные</button>
+            <button class="tab-button active" data-status="open">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M8 12h8M12 8v8"/>
+                </svg>Открытые
+            </button>
+            <button class="tab-button" data-status="completed">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="20 6 9 17 4 12"/>
+                </svg>Завершенные
+            </button>
+            <button class="tab-button" data-status="cancelled">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="18" y1="6" x2="6" y2="18"/>
+                    <line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>Отменённые
+            </button>
         `;
         const filterGroup = searchInput.closest('.filter-group') || searchInput.parentElement;
         filterGroup.parentNode.insertBefore(tabContainer, filterGroup.nextSibling);
@@ -119,12 +134,24 @@ function initializeWithdrawals() {
 
         bulkActionContainer.querySelector('#completeSelected').onclick = async () => {
             try {
-                await Promise.all([...selectedWithdrawals].map(withdrawalId =>
+                const toComplete = [...selectedWithdrawals];
+                await Promise.all(toComplete.map(withdrawalId =>
                     api.patch(`/withdrawals/${withdrawalId}/complete`)
                 ));
+                toComplete.forEach(withdrawalId => {
+                    const row = document.querySelector(`tr[data-id="${withdrawalId}"]`);
+                    if (row) {
+                        const btn = row.querySelector('.complete-withdrawal');
+                        if (btn) {
+                            btn.disabled = true;
+                            btn.textContent = 'Завершено';
+                        }
+                        const checkbox = row.querySelector('.withdrawal-checkbox');
+                        if (checkbox) checkbox.disabled = true;
+                    }
+                });
                 selectedWithdrawals.clear();
                 bulkActionContainer.style.display = 'none';
-                loadWithdrawals();
             } catch (err) {
                 console.error('Error completing selected withdrawals:', err);
                 if (err.response?.status === 401 || err.response?.status === 403) {
@@ -139,7 +166,6 @@ function initializeWithdrawals() {
         bulkActionContainer.querySelector('#cancelSelection').onclick = () => {
             selectedWithdrawals.clear();
             bulkActionContainer.style.display = 'none';
-            loadWithdrawals();
         };
 
         function renderWithdrawalsTable() {
@@ -148,7 +174,7 @@ function initializeWithdrawals() {
 
             tbody.innerHTML = '';
             if (total === 0 || list.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="8">На данный момент информация отсутствует</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 40px; color: #999;">На данный момент информация отсутствует</td></tr>';
                 bulkActionContainer.style.display = 'none';
                 pageInfo.textContent = 'Страница 1 из 1';
                 prevBtn.disabled = true;
@@ -169,7 +195,7 @@ function initializeWithdrawals() {
                 tr.innerHTML = `
                     <td><input type="checkbox" class="withdrawal-checkbox" data-id="${buttonId}" ${w.status === 'completed' ? 'disabled' : ''} ${isSelected ? 'checked' : ''}></td>
                     <td>${buttonId}</td>
-                    <td>${username}</td>
+                    <td><a href="${(user && user.username) || w.username ? 'https://t.me/' + ((user && user.username) || w.username) : 'https://t.me/id' + w.userId}" target="_blank">${username}</a></td>
                     <td>${formatNumber(w.rubAmount, 2)}</td>
                     <td>${formatNumber(w.cryptoAmount, 8)}</td>
                     <td>${w.walletAddress}</td>
@@ -178,6 +204,9 @@ function initializeWithdrawals() {
                         ${w.status === 'completed'
                     ? `<button class="complete-withdrawal" data-id="${buttonId}" disabled>Завершено</button>`
                     : `<button class="complete-withdrawal" data-id="${buttonId}">Завершить</button>`}
+                        ${w.status !== 'completed' && w.status !== 'cancelled'
+                    ? `<button class="cancel-withdrawal" data-id="${buttonId}">Отменить</button>`
+                    : ''}
                     </td>
                 `;
                 tbody.appendChild(tr);
@@ -215,7 +244,13 @@ function initializeWithdrawals() {
                     const withdrawalId = btn.dataset.id;
                     api.patch(`/withdrawals/${withdrawalId}/complete`).then(() => {
                         selectedWithdrawals.delete(withdrawalId);
-                        loadWithdrawals();
+                        const row = document.querySelector(`tr[data-id="${withdrawalId}"]`);
+                        if (row) {
+                            btn.disabled = true;
+                            btn.textContent = 'Завершено';
+                            const checkbox = row.querySelector('.withdrawal-checkbox');
+                            if (checkbox) checkbox.disabled = true;
+                        }
                     }).catch(err => {
                         if (err.response?.status === 401 || err.response?.status === 403) {
                             localStorage.removeItem('token');
@@ -223,6 +258,37 @@ function initializeWithdrawals() {
                         } else {
                             console.error('Error completing withdrawals:', err);
                             alert(err.response?.data?.error || 'Ошибка при завершении вывода');
+                        }
+                    });
+                };
+            });
+
+            document.querySelectorAll('.cancel-withdrawal:not(:disabled)').forEach(btn => {
+                btn.onclick = () => {
+                    const withdrawalId = btn.dataset.id;
+                    if (!confirm('Вы уверены, что хотите отменить эту заявку на вывод?')) {
+                        return;
+                    }
+                    api.patch(`/withdrawals/${withdrawalId}/cancel`).then(() => {
+                        const row = document.querySelector(`tr[data-id="${withdrawalId}"]`);
+                        if (row) {
+                            btn.disabled = true;
+                            btn.textContent = 'Отменено';
+                            const completeBtn = row.querySelector('.complete-withdrawal');
+                            if (completeBtn) {
+                                completeBtn.disabled = true;
+                                completeBtn.textContent = 'Отменено';
+                            }
+                            const checkbox = row.querySelector('.withdrawal-checkbox');
+                            if (checkbox) checkbox.disabled = true;
+                        }
+                    }).catch(err => {
+                        if (err.response?.status === 401 || err.response?.status === 403) {
+                            localStorage.removeItem('token');
+                            window.location.href = '/login';
+                        } else {
+                            console.error('Error cancelling withdrawal:', err);
+                            alert(err.response?.data?.error || 'Ошибка при отмене вывода');
                         }
                     });
                 };

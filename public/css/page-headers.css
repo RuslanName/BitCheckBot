@@ -1,0 +1,35 @@
+.bot-status-section {
+    margin-bottom: 24px;
+}
+
+.bot-status-card {
+    background: #ffffff;
+    border-radius: 12px;
+    padding: 24px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+    border: 1px solid #e9ecef;
+}
+
+.bot-status-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 20px;
+    font-weight: 700;
+    color: #2d3748;
+    margin-bottom: 20px;
+}
+
+.bot-status-content {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.bot-status-text {
+    font-size: 15px;
+    font-weight: 600;
+    color: #2d3748;
+}
+
+

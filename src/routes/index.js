@@ -1,11 +1,12 @@
-const authRoutes = require('./auth_routes');
-const configRoutes = require('./config_routes');
-const userRoutes = require('./user_routes');
-const dealRoutes = require('./deal_routes');
-const { router: broadcastRoutes, upload } = require('./broadcast_routes');
-const raffleRoutes = require('./raffle_routes');
-const withdrawalRoutes = require('./withdrawal_routes');
-const analyticsRoutes = require('./analytics_routes');
+const authRoutes = require('./auth-routes');
+const configRoutes = require('./config-routes');
+const userRoutes = require('./user-routes');
+const dealRoutes = require('./deal-routes');
+const { router: broadcastRoutes, upload } = require('./broadcast-routes');
+const raffleRoutes = require('./raffle-routes');
+const withdrawalRoutes = require('./withdrawal-routes');
+const analyticsRoutes = require('./analytics-routes');
+const cashbackRoutes = require('./cashback-routes');
 
 module.exports = {
     authRoutes,
@@ -16,6 +17,7 @@ module.exports = {
     upload,
     raffleRoutes,
     withdrawalRoutes,
-    analyticsRoutes
+    analyticsRoutes,
+    cashbackRoutes
 };
 

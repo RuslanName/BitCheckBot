@@ -19,9 +19,23 @@ function initializeDeals() {
         const tabContainer = document.createElement('div');
         tabContainer.className = 'tab-container';
         tabContainer.innerHTML = `
-            <button class="tab-button active" data-status="open">Открытые</button>
-            <button class="tab-button" data-status="completed">Завершенные</button>
-            <button class="tab-button" data-status="expired">Просроченные</button>
+            <button class="tab-button active" data-status="open">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M8 12h8M12 8v8"/>
+                </svg>Открытые
+            </button>
+            <button class="tab-button" data-status="completed">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="20 6 9 17 4 12"/>
+                </svg>Завершенные
+            </button>
+            <button class="tab-button" data-status="expired">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <polyline points="12 6 12 12 8 14"/>
+                </svg>Просроченные
+            </button>
         `;
         const filterGroup = searchInput.closest('.filter-group') || searchInput.parentElement;
         filterGroup.parentNode.insertBefore(tabContainer, filterGroup.nextSibling);
@@ -31,6 +45,7 @@ function initializeDeals() {
         bulkActionContainer.style.display = 'none';
         bulkActionContainer.innerHTML = `
             <button id="completeSelected">Завершить выбранные</button>
+            <button id="cancelSelected">Отменить выбранные</button>
             <button id="deleteSelected">Удалить выбранные</button>
             <button id="cancelSelection">Отменить</button>
         `;
@@ -130,13 +145,27 @@ function initializeDeals() {
 
         bulkActionContainer.querySelector('#completeSelected').onclick = async () => {
             try {
-                await Promise.all([...selectedDeals].map(dealId =>
+                const dealsToComplete = [...selectedDeals];
+                await Promise.all(dealsToComplete.map(dealId =>
                     api.patch(`/deals/${dealId}/complete`)
                 ));
+                dealsToComplete.forEach(dealId => {
+                    const row = document.querySelector(`tr[data-id="${dealId}"]`);
+                    if (row) {
+                        const completeBtn = row.querySelector('.complete-deal');
+                        if (completeBtn) {
+                            completeBtn.disabled = true;
+                            completeBtn.textContent = 'Завершено';
+                        }
+                        const deleteBtn = row.querySelector('.delete-deal');
+                        if (deleteBtn) deleteBtn.remove();
+                        const checkbox = row.querySelector('.deal-checkbox');
+                        if (checkbox) checkbox.disabled = true;
+                    }
+                });
                 selectedDeals.clear();
                 bulkActionContainer.style.display = 'none';
                 globalActionContainer.style.display = 'flex';
-                loadDeals();
             } catch (err) {
                 console.error('Error completing selected deals:', err);
                 if (err.response?.status === 401 || err.response?.status === 403) {
@@ -148,15 +177,45 @@ function initializeDeals() {
             }
         };
 
-        bulkActionContainer.querySelector('#deleteSelected').onclick = async () => {
+        bulkActionContainer.querySelector('#cancelSelected').onclick = async () => {
             try {
-                await Promise.all([...selectedDeals].map(dealId =>
-                    api.delete(`/deals/${dealId}`)
+                const dealsToCancel = [...selectedDeals];
+                await Promise.all(dealsToCancel.map(dealId =>
+                    api.patch(`/deals/${dealId}/cancel`)
                 ));
+                dealsToCancel.forEach(dealId => {
+                    const row = document.querySelector(`tr[data-id="${dealId}"]`);
+                    if (row) row.remove();
+                });
+                paginationInfo.total -= dealsToCancel.length;
                 selectedDeals.clear();
                 bulkActionContainer.style.display = 'none';
                 globalActionContainer.style.display = 'flex';
-                loadDeals();
+            } catch (err) {
+                console.error('Error canceling selected deals:', err);
+                if (err.response?.status === 401 || err.response?.status === 403) {
+                    localStorage.removeItem('token');
+                    window.location.href = '/login';
+                } else {
+                    alert(err.response?.data?.error || 'Ошибка при отмене выбранных заявок');
+                }
+            }
+        };
+
+        bulkActionContainer.querySelector('#deleteSelected').onclick = async () => {
+            try {
+                const dealsToDelete = [...selectedDeals];
+                await Promise.all(dealsToDelete.map(dealId =>
+                    api.delete(`/deals/${dealId}`)
+                ));
+                dealsToDelete.forEach(dealId => {
+                    const row = document.querySelector(`tr[data-id="${dealId}"]`);
+                    if (row) row.remove();
+                });
+                paginationInfo.total -= dealsToDelete.length;
+                selectedDeals.clear();
+                bulkActionContainer.style.display = 'none';
+                globalActionContainer.style.display = 'flex';
             } catch (err) {
                 console.error('Error deleting selected deals:', err);
                 if (err.response?.status === 401 || err.response?.status === 403) {
@@ -172,14 +231,12 @@ function initializeDeals() {
             selectedDeals.clear();
             bulkActionContainer.style.display = 'none';
             globalActionContainer.style.display = 'flex';
-            loadDeals();
         };
 
         globalActionContainer.querySelector('#completeAll').onclick = async () => {
             if (!confirm('Вы уверены, что хотите завершить все открытые сделки?')) return;
-            
+
             try {
-                // Загружаем все открытые сделки без пагинации
                 const allDealsResponse = await api.get('/deals', { params: { status: 'open', perPage: 10000 } });
                 const allOpenDeals = allDealsResponse.data.data || [];
                 
@@ -195,7 +252,21 @@ function initializeDeals() {
                 selectedDeals.clear();
                 bulkActionContainer.style.display = 'none';
                 globalActionContainer.style.display = 'flex';
-                loadDeals();
+                
+                allOpenDeals.forEach(deal => {
+                    const row = document.querySelector(`tr[data-id="${deal.id}"]`);
+                    if (row) {
+                        const completeBtn = row.querySelector('.complete-deal');
+                        if (completeBtn) {
+                            completeBtn.disabled = true;
+                            completeBtn.textContent = 'Завершено';
+                        }
+                        const deleteBtn = row.querySelector('.delete-deal');
+                        if (deleteBtn) deleteBtn.remove();
+                        const checkbox = row.querySelector('.deal-checkbox');
+                        if (checkbox) checkbox.disabled = true;
+                    }
+                });
                 
                 alert(`Успешно завершено ${allOpenDeals.length} сделок`);
             } catch (err) {
@@ -213,7 +284,6 @@ function initializeDeals() {
             if (!confirm('Вы уверены, что хотите удалить все открытые сделки?')) return;
             
             try {
-                // Загружаем все открытые сделки без пагинации
                 const allDealsResponse = await api.get('/deals', { params: { status: 'open', perPage: 10000 } });
                 const allOpenDeals = allDealsResponse.data.data || [];
                 
@@ -229,7 +299,11 @@ function initializeDeals() {
                 selectedDeals.clear();
                 bulkActionContainer.style.display = 'none';
                 globalActionContainer.style.display = 'flex';
-                loadDeals();
+                
+                allOpenDeals.forEach(deal => {
+                    const row = document.querySelector(`tr[data-id="${deal.id}"]`);
+                    if (row) row.remove();
+                });
                 
                 alert(`Успешно удалено ${allOpenDeals.length} сделок`);
             } catch (err) {
@@ -247,7 +321,7 @@ function initializeDeals() {
         function renderDealsTable(deals) {
             tbody.innerHTML = '';
             if (!deals || deals.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="13">На данный момент информация отсутствует</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="13" style="text-align: center; padding: 40px; color: #999;">На данный момент информация отсутствует</td></tr>';
                 bulkActionContainer.style.display = 'none';
                 globalActionContainer.style.display = 'flex';
                 const table = document.querySelector('table');
@@ -268,7 +342,7 @@ function initializeDeals() {
                 tr.innerHTML = `
                     <td><input type="checkbox" class="deal-checkbox" data-id="${d.id}" ${d.status === 'completed' || d.status === 'expired' ? 'disabled' : ''} ${isSelected ? 'checked' : ''}></td>
                     <td>${d.id || '-'}</td>
-                    <td><a href="https://t.me/${user.username}" target="_blank">${user.username || d.username}</a></td>
+                    <td><a href="${(user.username || d.username) ? 'https://t.me/' + (user.username || d.username) : 'https://t.me/id' + d.userId}" target="_blank">${user.username || d.username || 'ID ' + d.userId}</a></td>
                     <td>${d.type === 'buy' ? 'Покупка' : 'Продажа'}</td>
                     <td>${d.currency}</td>
                     <td>${formatNumber(d.rubAmount, 2)}</td>
@@ -364,7 +438,18 @@ function initializeDeals() {
                     const dealId = btn.dataset.id;
                     api.patch(`/deals/${dealId}/complete`).then(() => {
                         selectedDeals.delete(dealId);
-                        loadDeals();
+                        const row = document.querySelector(`tr[data-id="${dealId}"]`);
+                        if (row) {
+                            const completeBtn = row.querySelector('.complete-deal');
+                            if (completeBtn) {
+                                completeBtn.disabled = true;
+                                completeBtn.textContent = 'Завершено';
+                            }
+                            const deleteBtn = row.querySelector('.delete-deal');
+                            if (deleteBtn) deleteBtn.remove();
+                            const checkbox = row.querySelector('.deal-checkbox');
+                            if (checkbox) checkbox.disabled = true;
+                        }
                     }).catch(err => {
                         if (err.response?.status === 401 || err.response?.status === 403) {
                             localStorage.removeItem('token');

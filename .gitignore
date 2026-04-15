@@ -1,9 +1,10 @@
 node_modules
-.idea
-.gitignore
-.env
-test
+
+data/cache
 data/database
-data/files
-data/images/broadcasts
-nginx_setup.md
+data/uploads
+
+.idea
+
+.env
+.gitignore

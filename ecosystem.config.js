@@ -1,20 +1,20 @@
 module.exports = {
   apps: [
     {
-      name: 'main_bot',
-      script: './main_bot.js',
+      name: 'BitCheckBot',
+      script: './main-main-bot.js',
       instances: 1,
       exec_mode: 'fork',
       watch: false,
       restart_delay: 1000,
-      max_memory_restart: '500M',
+      max_memory_restart: '1G',
       out_file: './logs/main_bot.log',
       error_file: './logs/main_bot_error.log',
       log_date_format: 'YYYY-MM-DD HH:mm:ss',
     },
     {
-      name: 'spam_bot',
-      script: './spam_bot.js',
+      name: 'AntiSpamBot',
+      script: './anti-spam-bot.js',
       instances: 1,
       exec_mode: 'fork',
       watch: false,

@@ -1,0 +1,60 @@
+const axios = require('axios');
+const { COIN_PRICE_API_URL, CACHE_DURATION } = require('../config');
+const { axiosWithRetry } = require('../utils/retry-utils');
+
+let cachedBtcRubPrice = 8200000;
+let cachedLtcRubPrice = 6800;
+let cachedXmrRubPrice = 55000;
+let lastPriceUpdate = 0;
+
+async function updatePrices() {
+    const now = Date.now();
+    if (now - lastPriceUpdate < CACHE_DURATION) {
+        return;
+    }
+
+    try {
+        const response = await axiosWithRetry(
+            () => axios.get(`${COIN_PRICE_API_URL}/api/v3/simple/price?ids=bitcoin,litecoin,monero&vs_currencies=rub`, { timeout: 10000 })
+        );
+        cachedBtcRubPrice = response.data.bitcoin.rub || cachedBtcRubPrice;
+        cachedLtcRubPrice = response.data.litecoin.rub || cachedLtcRubPrice;
+        cachedXmrRubPrice = response.data.monero.rub || cachedXmrRubPrice;
+        lastPriceUpdate = now;
+    } catch (error) {
+        console.error('Failed to update prices after all retries:', error.message);
+    }
+}
+
+async function getBtcRubPrice() {
+    await updatePrices();
+    return cachedBtcRubPrice;
+}
+
+async function getLtcRubPrice() {
+    await updatePrices();
+    return cachedLtcRubPrice;
+}
+
+async function getXmrRubPrice() {
+    await updatePrices();
+    return cachedXmrRubPrice;
+}
+
+setInterval(() => {
+    updatePrices().catch(error => {
+        console.error('Error updating prices in interval:', error.message);
+    });
+}, CACHE_DURATION);
+
+function getLastPriceUpdate() {
+    return lastPriceUpdate;
+}
+
+module.exports = {
+    getBtcRubPrice,
+    getLtcRubPrice,
+    getXmrRubPrice,
+    getLastPriceUpdate
+};
+

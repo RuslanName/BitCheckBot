@@ -1,11 +1,35 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+html,
 body {
     padding: 0;
     margin: 0;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    font-family: 'Inter', 'Segoe UI', sans-serif;
     background: #f8f9fa;
     color: #333;
     line-height: 1.6;
     font-size: 16px;
+}
+
+body {
+    visibility: hidden;
+}
+
+button,
+input,
+select,
+textarea {
+    font-family: 'Inter', 'Segoe UI', sans-serif !important;
+}
+
+*,
+*::before,
+*::after {
+    font-family: 'Inter', 'Segoe UI', sans-serif !important;
+}
+
+body.loaded {
+    visibility: visible;
 }
 
 body.no-sidebar {

@@ -60,4 +60,12 @@ function checkAuth(callback) {
     return { userRole, userCurrency };
 }
 
-export { api, formatDateTime, formatNumber, checkAuth };
+function setupModalCloseOnOverlayClick(modal) {
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            modal.remove();
+        }
+    });
+}
+
+export { api, formatDateTime, formatNumber, checkAuth, setupModalCloseOnOverlayClick };

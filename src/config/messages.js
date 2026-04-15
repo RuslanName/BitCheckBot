@@ -1,94 +1,44 @@
-const POST_SCRIPT = '🚀 BitCheck — твой надёжный обменник для покупки и продажи Bitcoin и Litecoin!';
-
 const MESSAGES = {
-    ERROR_BOT_DISABLED: '🚫 Бот временно отключен. Пожалуйста, попробуйте позже.',
-    ERROR_CALLBACK_PROCESSING: '❌ Ошибка обработки',
     ERROR_CONFIG: '❌ Ошибка: конфигурация не загружена. Обратитесь в поддержку.',
-    ERROR_FILE_SEND_FAILED: '❌ Ошибка при отправке файла',
     ERROR_GENERAL: '❌ Произошла ошибка, попробуйте снова',
+    ERROR_TRADE_COMMAND: (msg) => `❌ Ошибка: ${msg}`,
     ERROR_INVALID_DATA: '❌ Ошибка: некорректные данные',
     ERROR_NOT_REGISTERED: '❌ Вы не зарегистрированы. Используйте /start',
-    ERROR_RATE_LIMIT: '🚫 Слишком много запросов! Пожалуйста, попробуйте снова через несколько секунд.',
 
     ERROR_INVALID_CAPTCHA: '❌ Неверный код, попробуйте снова! Введите код с картинки 🤖',
 
-    ERROR_INVALID_AMOUNT: (currency) => `❌ Введите корректную сумму в RUB или ${currency}`,
-    ERROR_INVALID_REQUISITES: '❌ Введите корректные реквизиты',
     ERROR_INVALID_WALLET_ADDRESS: (currency) => `❌ Введите корректный адрес кошелька для ${currency}`,
-    ERROR_AMOUNT_OUT_OF_RANGE: (isBuy, currency, minRub, minCrypto, maxRub, maxCrypto) =>
-        `❌ Сумма вне допустимого диапазона!\n\n💰 Введите сумму для ${isBuy ? 'покупки' : 'продажи'} ${currency} (в RUB или ${currency})\nМин: ${minRub} RUB (~${minCrypto} ${currency})\nМакс: ${maxRub} RUB (~${maxCrypto} ${currency})`,
 
-    ERROR_DEAL_CANNOT_CANCEL: '❌ Нельзя отменить завершенную или просроченную заявку',
-    ERROR_DEAL_COMPLETE_FAILED: '❌ Ошибка при завершении сделки',
-    ERROR_DEAL_DELETE_FAILED: '❌ Ошибка при удалении сделки',
     ERROR_DEAL_NOT_FOUND: '❌ Данные сделки не найдены',
     ERROR_DEAL_NOT_FOUND_OR_PROCESSED: '❌ Заявка не найдена или уже обработана',
 
-    ERROR_PAYMENT_INVOICE_DATA_NOT_FOUND: '❌ Ошибка при обработке оплаты: данные инвойса не найдены',
-    ERROR_PAYMENT_INVOICE_ID_NOT_FOUND: '❌ Ошибка при обработке оплаты: не найден ID инвойса',
-    ERROR_PAYMENT_PROCESSING_FAILED: '❌ Ошибка при обработке оплаты',
     ERROR_PAYMENT_VARIANTS_FETCH_FAILED: '❌ Ошибка при получении вариантов оплаты',
     ERROR_PAYMENT_VARIANTS_NOT_FOUND: '❌ Нет доступных вариантов оплаты',
 
-    ERROR_RAFFLE_NOT_FOUND: '❌ Розыгрыш не найден',
-
-    ERROR_SUPPORT_SEND_FAILED: (targetId) => `❌ Ошибка отправки ответа пользователю ID ${targetId}`,
-    ERROR_USER_NOT_FOUND_OR_CHAT_INVALID: (targetId) => `❌ Пользователь ID ${targetId} не найден или чат недоступен`,
-
-    ERROR_NO_FUNDS: '❌ Нет средств для вывода',
     ERROR_WALLET_NOT_FOUND: '❌ Кошелёк не найден',
-
-    ERROR_WITHDRAWAL_COMPLETE_FAILED: '❌ Ошибка при завершении вывода',
     ERROR_WITHDRAWAL_DATA_NOT_FOUND: '❌ Ошибка: данные для вывода не найдены',
-    ERROR_WITHDRAWAL_NOT_FOUND: '❌ Ошибка: данные для вывода не найдены',
-    ERROR_WITHDRAWAL_NOT_FOUND_OR_PROCESSED: '❌ Заявка на вывод не найдена или уже обработана',
 
-    CAPTCHA_INPUT: '⬆️ Введите код с картинки 🤖',
     CAPTCHA_SUCCESS: '✅ Капча пройдена!',
-
-    SUPPORT_OPERATOR_MESSAGE: (userDisplay, id, text) => `🆘 От ${userDisplay} (ID ${id})\n${text}`,
-    SUPPORT_REPLY_MESSAGE: (text) => `📩 Ответ от поддержки:\n${text}`,
-    SUPPORT_REPLY_SENT: (targetId) => `✅ Ответ отправлен пользователю ID ${targetId}`,
-    SUPPORT_SENT: '🚀 Отправлено!',
-    SUPPORT_WRITE: '🆘 Напишите нам!',
-
-    REQUISITES_ADDED: '✅ Реквизиты добавлены',
-    WALLET_ADDED: '✅ Кошелёк добавлен',
-
-    DEAL_CREATED: (dealId) => `✅ Заявка на сделку создана! № ${dealId}`,
-    DEAL_PAYMENT_INSTRUCTIONS_BUY: (hasPaymentDetails) => 
-        hasPaymentDetails 
-            ? '‼️ Пожалуйста, произведите оплату по указанным реквизитам и подтвердите, нажав "Оплата выполнена"'
-            : '‼️ Свяжитесь с оператором для получения реквизитов',
-    DEAL_PAYMENT_INSTRUCTIONS_SELL: '‼️ Отправьте указанное количество на кошелёк BitCheck и свяжитесь с оператором для завершения сделки',
-    DEAL_PAYMENT_SELECT: '💸 Выберите способ оплаты:\nКарта - от 1000₽\nРеквизиты BitCheck - могут отсутствовать',
-
-    WITHDRAWAL_CREATED: (withdrawalId) => `✅ Заявка на вывод рефералов создана! № ${withdrawalId}`,
-    WITHDRAWAL_INPUT_WALLET: '💼 Введите адрес кошелька для BTC',
-    WITHDRAWAL_OPERATOR_MESSAGE: (withdrawalId, username, userId, cryptoAmount, rubAmount, walletAddress) => 
-        `🆕 Новая заявка на вывод рефералов № ${withdrawalId}\n@${username || 'Нет'} (ID ${userId})\nКоличество: ${cryptoAmount.toFixed(8)} BTC\nСумма: ${rubAmount.toFixed(2)} RUB\nКошелёк: <code>${walletAddress}</code>`,
-
-    CHAT: '💬 Чат BitCheck',
-    REVIEWS: '📝 Отзывы BitCheck',
 
     CANCEL_ACTION: '❌ Отменить',
     CANCEL_DEAL: (dealId) => `❌ Отменить заявку`,
-    CONTACT_OPERATOR: '📞 Связаться с оператором',
     CONTACT_OPERATOR_ALT: '📞 Написать оператору',
-    OPERATOR_CLOSE: '🔒 Закрыть',
-    OPERATOR_COMPLETE_WITHDRAWAL: (withdrawalId) => '✅ Завершить',
-    OPERATOR_REPLY: (userId) => '📝 Ответить',
     OPERATOR_WRITE_USER: '📞 Написать пользователю',
     PAYMENT_DONE: (dealId) => '✅ Оплата выполнена',
-    UPDATE_DETAILS: '🔄 Обновить реквизиты',
+
+    REQUISITES_DELETE_BTC: '✅ BTC кошелёк удалён',
+    REQUISITES_DELETE_LTC: '✅ LTC кошелёк удалён',
+
+    OTHER_MENU_TEXT: '📋 Прочее',
+    WALLET_INPUT_PROMPT: '💼 Введите адрес кошелька для BTC',
+
+    CB_USER_NOT_FOUND: 'Пользователь не найден',
+    CB_MIN_AMOUNT: '⚠️ Минимальная сумма — 500 RUB',
+    CB_BACK: '⬅️ Назад',
 
     CACHE_WARNING: '⚠️ Курс может быть устаревшим'
 };
 
 module.exports = {
-    POST_SCRIPT,
     MESSAGES
 };
-
-
-

@@ -1,4 +1,4 @@
-import { api, formatNumber, checkAuth } from './utils.js';
+import { api, formatNumber, checkAuth, setupModalCloseOnOverlayClick } from './utils.js';
 import { initializeSidebar, checkAccess } from './sidebar.js';
 
 const arrayKeys = [
@@ -6,11 +6,14 @@ const arrayKeys = [
     'vipUsersData',
     'buyPaymentDetailsBTC',
     'buyPaymentDetailsLTC',
+    'buyPaymentDetailsXMR',
     'commissionDiscounts',
     'buyCommissionScalePercentBTC',
     'sellCommissionScalePercentBTC',
     'buyCommissionScalePercentLTC',
-    'sellCommissionScalePercentLTC'
+    'sellCommissionScalePercentLTC',
+    'buyCommissionScalePercentXMR',
+    'sellCommissionScalePercentXMR'
 ];
 
 const paramTranslations = {
@@ -18,11 +21,13 @@ const paramTranslations = {
     vipUsersData: 'Данные VIP-пользователей',
     buyPaymentDetailsBTC: 'Реквизиты при покупке BTC',
     buyPaymentDetailsLTC: 'Реквизиты при покупке LTC',
+    buyPaymentDetailsXMR: 'Реквизиты при покупке XMR',
     dealCreationRecoveryMinutes: "Время восстановления реквизитов при покупке (в минутах)",
     limitReachedRecoveryHours: "Время восстановления реквизитов при достижении лимита (в часах)",
     dealPaymentDeadlineMinutes: "Время на оплату и подтверждение сделки пользователем (в минутах)",
     sellWalletBTC: 'Адрес BTC кошелька при продаже',
     sellWalletLTC: 'Адрес LTC кошелька при продаже',
+    sellWalletXMR: 'Адрес XMR кошелька при продаже',
     minWithdrawAmountRub: 'Минимальная сумма для вывода средств (в RUB)',
     minBuyAmountRubBTC: 'Минимальная покупка в BTC (в RUB)',
     maxBuyAmountRubBTC: 'Максимальная покупка в BTC (в RUB)',
@@ -32,10 +37,16 @@ const paramTranslations = {
     maxBuyAmountRubLTC: 'Максимальная покупка в LTC (в RUB)',
     minSellAmountRubLTC: 'Минимальная продажа в LTC (в RUB)',
     maxSellAmountRubLTC: 'Максимальная продажа в LTC (в RUB)',
+    minBuyAmountRubXMR: 'Минимальная покупка XMR (в RUB)',
+    maxBuyAmountRubXMR: 'Максимальная покупка в XMR (в RUB)',
+    minSellAmountRubXMR: 'Минима XMR (вльная продажа в RUB)',
+    maxSellAmountRubXMR: 'Максимальная продажа в XMR (в RUB)',
     buyCommissionScalePercentBTC: 'Процент комиссия при покупке BTC',
     sellCommissionScalePercentBTC: 'Процент комиссии при продаже BTC',
     buyCommissionScalePercentLTC: 'Процент комиссии при покупке LTC',
     sellCommissionScalePercentLTC: 'Процент комиссии при продаже LTC',
+    buyCommissionScalePercentXMR: 'Процент комиссии при покупке XMR',
+    sellCommissionScalePercentXMR: 'Процент комиссии при продаже XMR',
     priorityPriceRub: 'Цена приоритетной сделки (в RUB)',
     referralRevenuePercent: "Процент выручки рефералов",
     commissionDiscounts: 'Процент скидки на комиссию'
@@ -63,34 +74,6 @@ function initializeConfig() {
         let page = 1;
         let perPage = parseInt(perPageSelect.value) || 5;
 
-        const statusToggle = document.createElement('div');
-        statusToggle.className = 'toggle-container';
-        statusToggle.innerHTML = `
-            <label class="switch">
-                <input type="checkbox" id="botStatusToggle" />
-                <span class="slider round"></span>
-            </label>
-            <span class="toggle-label">Статус бота</span>
-        `;
-        if (credentialsForm) {
-            credentialsForm.parentNode.insertBefore(statusToggle, credentialsForm.nextSibling);
-        }
-
-        const processingSelect = document.createElement('div');
-        processingSelect.className = 'toggle-container';
-        processingSelect.innerHTML = `
-            <label for="processingTypeSelect" class="toggle-label">Тип процессинга:</label>
-            <select id="processingTypeSelect" class="config-select">
-                <option value="none">Без процессинга</option>
-                <option value="ros_trust_processing">Ros Trust Processing</option>
-                <option value="settlex_processing">Settlex Processing</option>
-            </select>
-        `;
-        if (credentialsForm) {
-            credentialsForm.parentNode.insertBefore(processingSelect, credentialsForm.nextSibling);
-            credentialsForm.parentNode.insertBefore(statusToggle, processingSelect);
-        }
-
         async function updateBotStatus() {
             try {
                 const response = await api.get('/bot/status');
@@ -100,18 +83,6 @@ function initializeConfig() {
                 }
             } catch (err) {
                 console.error('Error fetching bot status:', err);
-            }
-        }
-
-        async function updateProcessingStatus() {
-            try {
-                const response = await api.get('/processing/status');
-                const select = document.getElementById('processingTypeSelect');
-                if (select) {
-                    select.value = response.data.processingType || 'none';
-                }
-            } catch (err) {
-                console.error('Error fetching processing status:', err);
             }
         }
 
@@ -129,30 +100,8 @@ function initializeConfig() {
             });
         }
 
-        const processingTypeSelect = document.getElementById('processingTypeSelect');
-        if (processingTypeSelect) {
-            processingTypeSelect.addEventListener('change', async (e) => {
-                try {
-                    const newType = e.target.value;
-                    await api.post('/processing/type', { type: newType });
-                } catch (err) {
-                    console.error('Error updating processing type:', err);
-                    alert(err.response?.data?.error || 'Ошибка при обновлении типа процессинга');
-                    await updateProcessingStatus();
-                }
-            });
-        }
-
-        const checkBtn = document.getElementById('checkBotStatus');
-        if (checkBtn) {
-            checkBtn.addEventListener('click', () => {
-                updateBotStatus();
-                updateProcessingStatus();
-            });
-        }
-
         updateBotStatus();
-        updateProcessingStatus();
+        setInterval(updateBotStatus, 30000);
 
         api.get('/config').then(r => {
             config = r.data;
@@ -258,7 +207,7 @@ function initializeConfig() {
                             <button class="remove-item" data-idx="${idx}">Удалить</button>
                         </div>
                     `;
-                } else if (key === 'buyPaymentDetailsBTC' || key === 'buyPaymentDetailsLTC') {
+                } else if (key === 'buyPaymentDetailsBTC' || key === 'buyPaymentDetailsLTC' || key === 'buyPaymentDetailsXMR') {
                     itemsHtml += `
                         <div class="array-item">
                             <textarea data-idx="${idx}" class="array-input description" placeholder="Описание">${item.description || ''}</textarea>
@@ -284,12 +233,13 @@ function initializeConfig() {
                     `;
                 } else {
                     itemsHtml += `
-                        <div class="array-item">
+                        <div class="array-item operator-item">
                             <input type="text" value="${item.username || ''}" data-idx="${idx}" class="array-input operator-username" placeholder="Имя оператора" />
                             <input type="text" value="${item.password || ''}" data-idx="${idx}" class="array-input operator-password" placeholder="Пароль" />
                             <select data-idx="${idx}" class="array-input currency-select">
                                 <option value="BTC" ${item.currency === 'BTC' ? 'selected' : ''}>BTC</option>
                                 <option value="LTC" ${item.currency === 'LTC' ? 'selected' : ''}>LTC</option>
+                                <option value="XMR" ${item.currency === 'XMR' ? 'selected' : ''}>XMR</option>
                             </select>
                             <button class="remove-item" data-idx="${idx}">Удалить</button>
                         </div>
@@ -299,7 +249,8 @@ function initializeConfig() {
 
             modal.innerHTML = `
                 <div class="modal-content">
-                    <h3>Редактировать ${paramTranslations[key]}</h3>
+                    <button class="close-modal" type="button" aria-label="Закрыть">×</button>
+                    <h3>Редактировать "${paramTranslations[key]}"</h3>
                     ${singleOperatorModeHtml}
                     <div id="array-items">${itemsHtml}</div>
                     <div class="prizes-container">
@@ -312,6 +263,11 @@ function initializeConfig() {
                 </div>
             `;
             document.body.appendChild(modal);
+            setupModalCloseOnOverlayClick(modal);
+            const closeBtn = modal.querySelector('.close-modal');
+            if (closeBtn) {
+                closeBtn.onclick = () => modal.remove();
+            }
 
             const addBtn = modal.querySelector('#addItem');
             addBtn.onclick = () => {
@@ -324,7 +280,7 @@ function initializeConfig() {
                         <input type="number" value="" data-idx="${idx}" class="array-input discount" placeholder="Скидка (в %)" />
                         <button class="remove-item" data-idx="${idx}">Удалить</button>
                     `;
-                } else if (key === 'buyPaymentDetailsBTC' || key === 'buyPaymentDetailsLTC') {
+                } else if (key === 'buyPaymentDetailsBTC' || key === 'buyPaymentDetailsLTC' || key === 'buyPaymentDetailsXMR') {
                     itemDiv.innerHTML = `
                         <textarea data-idx="${idx}" class="array-input description" placeholder="Описание"></textarea>
                         <input type="number" value="" data-idx="${idx}" class="array-input limitReachedRub" placeholder="Лимит (в RUB)" />
@@ -343,12 +299,14 @@ function initializeConfig() {
                         <button class="remove-item" data-idx="${idx}">Удалить</button>
                     `;
                 } else {
+                    itemDiv.classList.add('operator-item');
                     itemDiv.innerHTML = `
                         <input type="text" value="" data-idx="${idx}" class="array-input operator-username" placeholder="Имя оператора" />
                         <input type="text" value="" data-idx="${idx}" class="array-input operator-password" placeholder="Пароль" />
                         <select data-idx="${idx}" class="array-input currency-select">
                             <option value="BTC">BTC</option>
                             <option value="LTC">LTC</option>
+                            <option value="XMR">XMR</option>
                         </select>
                         <button class="remove-item" data-idx="${idx}">Удалить</button>
                     `;
@@ -384,7 +342,7 @@ function initializeConfig() {
                             if (username && !isNaN(discount)) {
                                 newValue.push({username, discount});
                             }
-                        } else if (key === 'buyPaymentDetailsBTC' || key === 'buyPaymentDetailsLTC') {
+                } else if (key === 'buyPaymentDetailsBTC' || key === 'buyPaymentDetailsLTC' || key === 'buyPaymentDetailsXMR') {
                             const description = item.querySelector('.description').value;
                             const limitReachedRub = parseFloat(item.querySelector('.limitReachedRub').value);
                             if (description && !isNaN(limitReachedRub)) {
@@ -453,7 +411,7 @@ function initializeConfig() {
                     itemsContainer.innerHTML = '';
                     if (!e.target.checked) {
                         itemsContainer.innerHTML = `
-                            <div class="array-item">
+                            <div class="array-item operator-item">
                                 <input type="text" value="${config.singleOperatorUsername || ''}" data-idx="0" class="array-input operator-username" placeholder="Имя оператора" />
                                 <input type="text" value="" data-idx="0" class="array-input operator-password" placeholder="Пароль" />
                                 <select data-idx="0" class="array-input currency-select">
@@ -467,7 +425,7 @@ function initializeConfig() {
                         itemsHtml = '';
                         (config[key] || []).forEach((item, idx) => {
                             itemsHtml += `
-                                <div class="array-item">
+                                <div class="array-item operator-item">
                                     <input type="text" value="${item.username || ''}" data-idx="${idx}" class="array-input operator-username" placeholder="Имя оператора" />
                                     <input type="text" value="${item.password || ''}" data-idx="${idx}" class="array-input operator-password" placeholder="Пароль" />
                                     <select data-idx="${idx}" class="array-input currency-select">
@@ -495,7 +453,7 @@ function initializeConfig() {
 
             tbody.innerHTML = '';
             if (total === 0) {
-                tbody.innerHTML = '<tr><td colspan="2">На данный момент информация отсутствует</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="2" style="text-align: center; padding: 40px; color: #999;">На данный момент информация отсутствует</td></tr>';
                 return;
             }
 
@@ -521,7 +479,9 @@ function initializeConfig() {
                         key === 'buyCommissionScalePercentBTC' ||
                         key === 'sellCommissionScalePercentBTC' ||
                         key === 'buyCommissionScalePercentLTC' ||
-                        key === 'sellCommissionScalePercentLTC') {
+                        key === 'sellCommissionScalePercentLTC' ||
+                        key === 'buyCommissionScalePercentXMR' ||
+                        key === 'sellCommissionScalePercentXMR') {
                         const formattedItems = value.map(item => `${formatNumber(item.amount, 2)}: ${item[key.includes('Commission') ? 'commission' : 'discount']}`);
                         displayValue = '';
                         for (let i = 0; i < formattedItems.length; i += 2) {
@@ -554,7 +514,7 @@ function initializeConfig() {
                         <span class="array-display">${displayValue}</span>
                         <button class="edit-array-btn" data-key="${key}">Редактировать</button>
                     `;
-                } else if (key === 'sellWalletBTC' || key === 'sellWalletLTC') {
+                } else if (key === 'sellWalletBTC' || key === 'sellWalletLTC' || key === 'sellWalletXMR') {
                     inputHtml = `
                         <textarea data-key="${key}" class="config-input">${value === null || value === undefined ? '' : value}</textarea>
                     `;
