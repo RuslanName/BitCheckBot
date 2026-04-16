@@ -49,7 +49,13 @@ const paramTranslations = {
     sellCommissionScalePercentXMR: 'Процент комиссии при продаже XMR',
     priorityPriceRub: 'Цена приоритетной сделки (в RUB)',
     referralRevenuePercent: "Процент выручки рефералов",
-    commissionDiscounts: 'Процент скидки на комиссию'
+    commissionDiscounts: 'Процент скидки на комиссию',
+    bitCheckChatUrl: 'Ссылка на чат',
+    bitCheckNewsUrl: 'Ссылка на канал новостей',
+    bitCheckOperatorUrl: 'Ссылка на оператора',
+    bitCheckSupportUrl: 'Ссылка на техподдержку',
+    bitCheckAdsUrl: 'Ссылка на рекламу',
+    bitCheckReviewUrl: 'Ссылка на отзывы'
 };
 
 function initializeConfig() {
@@ -171,7 +177,6 @@ function initializeConfig() {
             const term = searchInput.value.trim().toLowerCase();
             return Object.entries(config).filter(([key]) => {
                 if (!paramTranslations[key]) {
-                    console.warn(`key "${key}" not found in paramTranslations`);
                     return false;
                 }
                 return paramTranslations[key].toLowerCase().includes(term);

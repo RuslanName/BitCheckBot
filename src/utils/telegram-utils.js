@@ -126,7 +126,6 @@ async function sendBitCheckPhoto(chatId, extra = {}, imagePath = BIT_CHECK_IMAGE
             );
         } catch (error) {
             if (error.description && (error.description.includes('wrong file_id') || error.description.includes('file_id invalid') || error.description.includes('Bad Request'))) {
-                console.log('[IMG] Cached BitCheck file_id invalid, re-uploading file');
                 cachedBitCheckFileId = null;
                 msg = await telegramWithRetry(
                     () => bot.telegram.sendPhoto(chatId, { source: imagePath }, extra)
@@ -137,16 +136,12 @@ async function sendBitCheckPhoto(chatId, extra = {}, imagePath = BIT_CHECK_IMAGE
                     const fileIdCache = loadFileIdCache();
                     fileIdCache.bitCheckImage = cachedBitCheckFileId;
                     saveFileIdCache(fileIdCache);
-                    console.log('[IMG] Cached new BitCheck file_id after re-upload');
                 }
             } else {
                 throw error;
             }
         }
     } else {
-        if (imagePath === BIT_CHECK_IMAGE_PATH) {
-            console.log('[IMG] Uploading file');
-        }
         msg = await telegramWithRetry(
             () => bot.telegram.sendPhoto(chatId, { source: imagePath }, extra)
         );
@@ -156,7 +151,6 @@ async function sendBitCheckPhoto(chatId, extra = {}, imagePath = BIT_CHECK_IMAGE
             const fileIdCache = loadFileIdCache();
             fileIdCache.bitCheckImage = cachedBitCheckFileId;
             saveFileIdCache(fileIdCache);
-            console.log('[IMG] Cached new BitCheck file_id');
         }
     }
     return msg;
@@ -186,7 +180,6 @@ async function sendReviewPhoto(chatId, extra = {}) {
             );
         } catch (error) {
             if (error.description && (error.description.includes('wrong file_id') || error.description.includes('file_id invalid') || error.description.includes('Bad Request'))) {
-                console.log('[IMG] Cached Review file_id invalid, re-uploading file');
                 cachedReviewFileId = null;
                 msg = await telegramWithRetry(
                     () => bot.telegram.sendPhoto(chatId, { source: imagePath }, extra)
@@ -197,7 +190,6 @@ async function sendReviewPhoto(chatId, extra = {}) {
                     const fileIdCache = loadFileIdCache();
                     fileIdCache.reviewImage = cachedReviewFileId;
                     saveFileIdCache(fileIdCache);
-                    console.log('[IMG] Cached new Review file_id after re-upload');
                 }
             } else {
                 throw error;
@@ -215,7 +207,6 @@ async function sendReviewPhoto(chatId, extra = {}) {
             const fileIdCache = loadFileIdCache();
             fileIdCache.reviewImage = cachedReviewFileId;
             saveFileIdCache(fileIdCache);
-            console.log('[IMG] Cached new Review file_id');
         }
     }
     return msg;

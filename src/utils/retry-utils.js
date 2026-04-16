@@ -79,10 +79,7 @@ async function axiosWithRetry(axiosRequest, retryOptions = {}) {
         initialDelay: 2000,
         maxDelay: 10000,
         multiplier: 2,
-        onRetry: (error, attempt, maxRetries, delay) => {
-            const errorType = error.code || error.message?.substring(0, 50) || 'Unknown';
-            console.log(`Retrying request (attempt ${attempt}/${maxRetries}) after ${delay}ms. Error: ${errorType}`);
-        },
+        onRetry: () => {},
         ...retryOptions
     });
 }
@@ -93,10 +90,7 @@ async function telegramWithRetry(telegramRequest, retryOptions = {}) {
         initialDelay: 2000,
         maxDelay: 10000,
         multiplier: 2,
-        onRetry: (error, attempt, maxRetries, delay) => {
-            const errorType = error.code || error.message?.substring(0, 50) || 'Unknown';
-            console.log(`Retrying Telegram request (attempt ${attempt}/${maxRetries}) after ${delay}ms. Error: ${errorType}`);
-        },
+        onRetry: () => {},
         ...retryOptions
     });
 }

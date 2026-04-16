@@ -7,24 +7,17 @@ const {
     buildProfileReplyMarkup
 } = require('../../services');
 const { MESSAGES } = require('../../config');
-const {
-    BIT_CHECK_CHAT_URL,
-    BIT_CHECK_NEWS_URL,
-    BIT_CHECK_OPERATOR_URL,
-    BIT_CHECK_SUPPORT_URL,
-    BIT_CHECK_ADS_URL,
-    BIT_CHECK_REVIEW_URL
-} = require('../../config');
 
 function registerSimpleCommands(bot) {
     bot.hears('📞 Контакты', async ctx => {
+        const config = loadJson('config') || {};
         await sendBitCheckPhoto(ctx.chat.id, {
             caption: '📞 Наши актуальные контакты:\nВыберите нужный раздел ниже.',
             reply_markup: {
                 inline_keyboard: [
-                    [{ text: '💬 Чат', url: `${BIT_CHECK_CHAT_URL}` }, { text: '📰 Новости', url: `${BIT_CHECK_NEWS_URL}` }],
-                    [{ text: '👤 Оператор', url: `${BIT_CHECK_OPERATOR_URL}` }, { text: '🛠 Техподдержка', url: `${BIT_CHECK_SUPPORT_URL}` }],
-                    [{ text: '📢 Реклама', url: `${BIT_CHECK_ADS_URL}` }, { text: '⭐ Отзывы', url: `${BIT_CHECK_REVIEW_URL}` }]
+                    [{ text: '💬 Чат', url: `${config.bitCheckChatUrl}` }, { text: '📰 Новости', url: `${config.bitCheckNewsUrl}` }],
+                    [{ text: '👤 Оператор', url: `${config.bitCheckOperatorUrl}` }, { text: '🛠 Техподдержка', url: `${config.bitCheckSupportUrl}` }],
+                    [{ text: '📢 Реклама', url: `${config.bitCheckAdsUrl}` }, { text: '⭐ Отзывы', url: `${config.bitCheckReviewUrl}` }]
                 ]
             }
         });

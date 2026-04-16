@@ -2,9 +2,6 @@ const { Telegraf } = require('telegraf');
 const fs = require('fs-extra');
 const path = require('path');
 require('dotenv').config();
-const BIT_CHECK_OPERATOR_URL = 'https://t.me/BitCheck_exchange2';
-const BIT_CHECK_SUPPORT_URL = 'https://t.me/BitCheck_exchange123';
-const BIT_CHECK_ADS_URL = 'https://t.me/BitCneck001';
 const ASSETS_PATH = process.env.ASSETS_PATH ? process.env.ASSETS_PATH.replace(/\/$/, '') + '/' : './assets/';
 const BIT_CHECK_IMAGE_PATH = path.join(ASSETS_PATH, 'images/bit-check-image.png');
 
@@ -60,16 +57,21 @@ spam_bot.on('message', async (ctx) => {
 
             if (/оператор/i.test(messageText)) {
                 try {
+                    const config = loadJson('config') || {};
+                    const operatorUrl = config.bitCheckOperatorUrl || 'https://t.me/BitCheck_exchange2';
+                    const supportUrl = config.bitCheckSupportUrl || 'https://t.me/BitCheck_exchange123';
+                    const adsUrl = config.bitCheckAdsUrl || 'https://t.me/BitCneck001';
+
                     const sentMessage = await ctx.replyWithPhoto(
                         { source: imagePath },
                         {
                             caption: '💬 Напишите оператору для связи:',
                             reply_markup: {
                                 inline_keyboard: [
-                                    [{ text: 'Написать оператору ✍️', url: `${BIT_CHECK_OPERATOR_URL}` }],
+                                    [{ text: 'Написать оператору ✍️', url: `${operatorUrl}` }],
                                     [
-                                        { text: '🛠 Техподдержка', url: `${BIT_CHECK_SUPPORT_URL}` },
-                                        { text: '📣 Реклама', url: `${BIT_CHECK_ADS_URL}` }
+                                        { text: '🛠 Техподдержка', url: `${supportUrl}` },
+                                        { text: '📣 Реклама', url: `${adsUrl}` }
                                     ]
                                 ],
                             },
@@ -112,12 +114,11 @@ spam_bot.on('message', async (ctx) => {
             }
         }
     } catch (error) {
-        console.log(error);
+        console.error(error);
     }
 });
 
 spam_bot.launch().then(() => {
-    console.log('Bot started');
 }).catch(err => {
     console.error('Error launching bot:', err.message);
 });

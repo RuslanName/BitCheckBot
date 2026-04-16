@@ -3,11 +3,8 @@ const { loadJson, saveJson } = require('../utils/storage-utils');
 async function calculateCashback(commission) {
     try {
         const config = loadJson('config');
-        console.log('calculateCashback config:', config);
         const cashbackPercent = config?.cashbackPercent || 3;
-        console.log('cashbackPercent:', cashbackPercent, 'commission:', commission);
         const result = Math.round((commission * cashbackPercent) / 100);
-        console.log('calculated cashback:', result);
         return result;
     } catch (err) {
         console.error('Error calculating cashback:', err.message);
@@ -21,13 +18,11 @@ async function addCashback(userId, amount, dealId) {
         const cashback = await calculateCashback(amount);
         
         if (cashback <= 0) {
-            console.log(`[CASHBACK] skipped: amount=${amount}, dealId=${dealId}, reason=zero_amount`);
             return;
         }
 
         let user = users.find(u => u.id === userId);
         if (!user) {
-            console.log(`[CASHBACK] skipped: userId=${userId}, dealId=${dealId}, reason=no_user`);
             return;
         }
 
@@ -37,7 +32,6 @@ async function addCashback(userId, amount, dealId) {
 
         const alreadyApplied = user.cashbackHistory.some(h => h.dealId === dealId);
         if (alreadyApplied) {
-            console.log(`[CASHBACK] skipped: dealId=${dealId}, reason=already_applied`);
             return;
         }
 
@@ -53,7 +47,6 @@ async function addCashback(userId, amount, dealId) {
         });
 
         saveJson('users', users);
-        console.log(`[CASHBACK] applied: userId=${userId}, dealId=${dealId}, amount=${cashback} RUB`);
     } catch (err) {
         console.error('[CASHBACK] error:', err.message);
     }

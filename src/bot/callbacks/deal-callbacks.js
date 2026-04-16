@@ -184,7 +184,7 @@ function registerDealCallbacks(bot) {
                 }
 
                 const deal = deals[dealIndex];
-                deal.status = deal.type === 'buy' ? 'unpaid' : 'pending';
+                deal.status = 'unpaid';
                 deals[dealIndex] = deal;
 
                 const users = loadJson('users') || [];
@@ -254,26 +254,6 @@ function registerDealCallbacks(bot) {
                 });
                 states.pendingDeal[deal.userId] = { messageId: message.message_id, dealId: deal.id };
 
-                if (deal.type !== 'buy') {
-                    const operators = getOperators(deal.currency);
-                    for (const operator of operators) {
-                        try {
-                            const operatorId = users.find(u => u.username === operator.username)?.id;
-                            if (operatorId && await isValidChat(operatorId)) {
-                                const operatorCaption = buildOperatorDealMessage(deal, user, '', paymentDetailsText);
-                                const operatorReplyMarkup = buildOperatorDealReplyMarkup(deal, user);
-                                await sendBitCheckPhoto(operatorId, {
-                                    caption: operatorCaption,
-                                    reply_markup: operatorReplyMarkup,
-                                    parse_mode: 'HTML'
-                                });
-                            }
-                        } catch (error) {
-                            console.error(`Error sending to operator ${operator.username}:`, error.message);
-                        }
-                    }
-                }
-
                 await ctx.answerCbQuery('✅ Заявка создана', { show_alert: false });
                 saveJson('deals', deals);
                 saveJson('states', states);
@@ -294,12 +274,15 @@ function registerDealCallbacks(bot) {
                     return;
                 }
                 const deal = deals[dealIndex];
+                deal.status = 'pending';
+                deals[dealIndex] = deal;
                 const users = loadJson('users') || [];
                 const user = users.find(u => u.id === deal.userId);
                 const config = loadJson('config') || {};
                 const operatorContactUrl = getOperatorContactUrl(deal.currency);
                 const discount = await getCommissionDiscount(deal.userId);
                 const priorityPrice = deal.priority === 'elevated' ? config.priorityPriceRub : 0;
+                const actionText = deal.type === 'buy' ? 'Покупка' : 'Продажа';
                 let paymentDetailsText = '';
 
                 if (deal.selectedPaymentDetailsId) {
@@ -328,7 +311,7 @@ function registerDealCallbacks(bot) {
 
                 const message = await sendBitCheckPhoto(ctx.chat.id, {
                     caption: `✅ Оплата по заявке № ${deal.id} подтверждена!\n` +
-                        `Покупка ${deal.currency}\n` +
+                        `${actionText} ${deal.currency}\n` +
                         `Количество: ${deal.cryptoAmount} ${deal.currency}\n` +
                         `Сумма: ${deal.rubAmount} RUB\n` +
                         `Комиссия: ${deal.commission} RUB (скидка ${discount.toFixed(2)}%)\n` +
@@ -364,7 +347,7 @@ function registerDealCallbacks(bot) {
                             ];
                             await sendBitCheckPhoto(operatorId, {
                                 caption: `🆕 Новая заявка на сделку № ${deal.id}\n` +
-                                    `Покупка ${deal.currency}\n` +
+                                    `${actionText} ${deal.currency}\n` +
                                     `@${user.username || 'Нет'} (ID ${deal.userId})\n` +
                                     `Количество: ${deal.cryptoAmount}\n` +
                                     `Сумма: ${deal.rubAmount} RUB\n` +

@@ -6,15 +6,9 @@ const TELEGRAM_API = `https://api.telegram.org/bot${process.env.MAIN_BOT_TOKEN}`
 const SPAM_BOT_TOKEN = process.env.SPAM_BOT_TOKEN;
 const JWT_SECRET = process.env.JWT_SECRET;
 const COIN_PRICE_API_URL = process.env.COIN_PRICE_API_URL;
-const BIT_CHECK_CHAT_URL = process.env.BIT_CHECK_CHAT_URL;
-const BIT_CHECK_NEWS_URL = process.env.BIT_CHECK_NEWS_URL;
-const BIT_CHECK_OPERATOR_URL = process.env.BIT_CHECK_OPERATOR_URL;
-const BIT_CHECK_SUPPORT_URL = process.env.BIT_CHECK_SUPPORT_URL;
-const BIT_CHECK_ADS_URL = process.env.BIT_CHECK_ADS_URL;
-const BIT_CHECK_REVIEW_URL = process.env.BIT_CHECK_REVIEW_URL;
 const DATA_PATH = process.env.DATA_PATH ? process.env.DATA_PATH.replace(/\/$/, '') + '/' : undefined;
 const ASSETS_PATH = process.env.ASSETS_PATH ? process.env.ASSETS_PATH.replace(/\/$/, '') + '/' : undefined;
-const BIT_CHECK_IMAGE_PATH = ASSETS_PATH ? path.join(ASSETS_PATH, 'images/crypto-bit-image.png') : undefined;
+const BIT_CHECK_IMAGE_PATH = ASSETS_PATH ? path.join(ASSETS_PATH, 'images/bit-check-image.png') : undefined;
 const REVIEW_IMAGE_PATH = ASSETS_PATH ? path.join(ASSETS_PATH, 'images/review-image.png') : undefined;
 const WEBHOOK_DOMAIN = process.env.WEBHOOK_DOMAIN;
 const BOT_MODE = (process.env.BOT_MODE || 'webhook').toLowerCase();
@@ -29,12 +23,6 @@ module.exports = {
     SPAM_BOT_TOKEN,
     JWT_SECRET,
     COIN_PRICE_API_URL,
-    BIT_CHECK_CHAT_URL,
-    BIT_CHECK_NEWS_URL,
-    BIT_CHECK_OPERATOR_URL,
-    BIT_CHECK_SUPPORT_URL,
-    BIT_CHECK_ADS_URL,
-    BIT_CHECK_REVIEW_URL,
     DATA_PATH,
     ASSETS_PATH,
     BIT_CHECK_IMAGE_PATH,

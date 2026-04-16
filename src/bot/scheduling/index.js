@@ -344,7 +344,6 @@ async function scheduleTasks() {
             task.stop();
         }
         cronTasks.clear();
-        console.log('Cleared all cron tasks');
 
         const broadcasts = loadJson('broadcasts') || [];
         if (!Array.isArray(broadcasts)) {
@@ -493,7 +492,6 @@ async function scheduleTasks() {
         console.error('Error scheduling tasks:', error.message);
     } finally {
         isScheduling = false;
-        console.log('Scheduling completed');
     }
 }
 

@@ -30,7 +30,6 @@ function initializeUsers() {
                 const response = await api.get('/btc-price');
                 currentBtcPrice = response.data.price;
             } catch (error) {
-                console.warn('Не удалось получить курс BTC, используем значение по умолчанию:', error);
             }
         }
 

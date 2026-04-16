@@ -5,7 +5,7 @@ const path = require('path');
 const fs = require('fs-extra');
 const { loadJson, saveJson, getUserById } = require('../utils/storage-utils');
 const { authenticateToken } = require('../middleware');
-const { TELEGRAM_API, BIT_CHECK_IMAGE_PATH, BIT_CHECK_REVIEW_URL } = require('../config');
+const { TELEGRAM_API, BIT_CHECK_IMAGE_PATH } = require('../config');
 const { shouldLogSendError, axiosWithRetry } = require('../utils');
 const { addCashback, calculateCashback } = require('../services/cashback-service');
 
@@ -29,7 +29,7 @@ router.get('/deals', authenticateToken, async (req, res) => {
             
             if (status) {
                 const statusMap = {
-                    'open': ['draft', 'pending'],
+                    'open': ['pending'],
                     'completed': ['completed'],
                     'expired': ['expired']
                 };
@@ -107,7 +107,7 @@ router.patch('/deals/:id/complete', authenticateToken, async (req, res) => {
         const users = loadJson('users') || [];
 
         try {
-            const reviewChatUrl = BIT_CHECK_REVIEW_URL;
+            const reviewChatUrl = config.bitCheckReviewUrl || 'https://t.me/bitcheck_ot';
             
             const form = new FormData();
             form.append('chat_id', userId);

@@ -149,23 +149,10 @@ function initializeDeals() {
                 await Promise.all(dealsToComplete.map(dealId =>
                     api.patch(`/deals/${dealId}/complete`)
                 ));
-                dealsToComplete.forEach(dealId => {
-                    const row = document.querySelector(`tr[data-id="${dealId}"]`);
-                    if (row) {
-                        const completeBtn = row.querySelector('.complete-deal');
-                        if (completeBtn) {
-                            completeBtn.disabled = true;
-                            completeBtn.textContent = 'Завершено';
-                        }
-                        const deleteBtn = row.querySelector('.delete-deal');
-                        if (deleteBtn) deleteBtn.remove();
-                        const checkbox = row.querySelector('.deal-checkbox');
-                        if (checkbox) checkbox.disabled = true;
-                    }
-                });
                 selectedDeals.clear();
                 bulkActionContainer.style.display = 'none';
                 globalActionContainer.style.display = 'flex';
+                loadDeals();
             } catch (err) {
                 console.error('Error completing selected deals:', err);
                 if (err.response?.status === 401 || err.response?.status === 403) {
@@ -252,21 +239,7 @@ function initializeDeals() {
                 selectedDeals.clear();
                 bulkActionContainer.style.display = 'none';
                 globalActionContainer.style.display = 'flex';
-                
-                allOpenDeals.forEach(deal => {
-                    const row = document.querySelector(`tr[data-id="${deal.id}"]`);
-                    if (row) {
-                        const completeBtn = row.querySelector('.complete-deal');
-                        if (completeBtn) {
-                            completeBtn.disabled = true;
-                            completeBtn.textContent = 'Завершено';
-                        }
-                        const deleteBtn = row.querySelector('.delete-deal');
-                        if (deleteBtn) deleteBtn.remove();
-                        const checkbox = row.querySelector('.deal-checkbox');
-                        if (checkbox) checkbox.disabled = true;
-                    }
-                });
+                loadDeals();
                 
                 alert(`Успешно завершено ${allOpenDeals.length} сделок`);
             } catch (err) {
@@ -438,18 +411,7 @@ function initializeDeals() {
                     const dealId = btn.dataset.id;
                     api.patch(`/deals/${dealId}/complete`).then(() => {
                         selectedDeals.delete(dealId);
-                        const row = document.querySelector(`tr[data-id="${dealId}"]`);
-                        if (row) {
-                            const completeBtn = row.querySelector('.complete-deal');
-                            if (completeBtn) {
-                                completeBtn.disabled = true;
-                                completeBtn.textContent = 'Завершено';
-                            }
-                            const deleteBtn = row.querySelector('.delete-deal');
-                            if (deleteBtn) deleteBtn.remove();
-                            const checkbox = row.querySelector('.deal-checkbox');
-                            if (checkbox) checkbox.disabled = true;
-                        }
+                        loadDeals();
                     }).catch(err => {
                         if (err.response?.status === 401 || err.response?.status === 403) {
                             localStorage.removeItem('token');
